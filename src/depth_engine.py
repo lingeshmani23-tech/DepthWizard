@@ -13,12 +13,26 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 # Suppress unnecessary logs
+import os
+from typing import Tuple, Dict, Any, Optional
+import numpy as np
+from PIL import Image
+import cv2
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
+# Suppress unnecessary logs
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+try:
+    from config import MODEL_NAME
+except ImportError:
+    MODEL_NAME = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"
 
 _MODEL_CACHE = {}
 
 
-def load_depth_model(model_id: str = "depth-anything/Depth-Anything-V2-Small-hf"):
+def load_depth_model(model_id: str = MODEL_NAME):
     """
     Load pretrained Depth Anything V2 model from Hugging Face transformers.
     Cached in global memory dictionary to enforce ONE-TIME loading.
@@ -51,7 +65,7 @@ def load_depth_model(model_id: str = "depth-anything/Depth-Anything-V2-Small-hf"
         return None, None, "cpu"
 
 
-def estimate_depth(rgb_img: np.ndarray, model_id: str = "depth-anything/Depth-Anything-V2-Small-hf") -> np.ndarray:
+def estimate_depth(rgb_img: np.ndarray, model_id: str = MODEL_NAME) -> np.ndarray:
     """
     Perform monocular depth estimation on RGB numpy array.
     Executes under torch.inference_mode().
