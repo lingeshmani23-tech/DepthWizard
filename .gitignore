@@ -23,3 +23,5 @@ models/*.onnx
 
 # Temporary outputs (optional caches)
 scratch/
+.vercel/
+
