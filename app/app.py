@@ -128,14 +128,25 @@ gpu_name = torch.cuda.get_device_name(0) if cuda_available else "CPU Mode"
 st.sidebar.success(f"⚡ Device: `{gpu_name}`" if cuda_available else "⚠️ CPU Execution Mode")
 st.sidebar.info("🧠 Model: `Depth-Anything-V2-Metric-Outdoor-Small-hf`")
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("📥 Upload Outdoor RGB Image")
-
-uploaded_file = st.sidebar.file_uploader(
-    "Choose Outdoor Image",
+# Main Page Image Upload Dropzone Card
+st.subheader("📥 Upload Outdoor RGB Image")
+main_uploaded_file = st.file_uploader(
+    "Drag and drop your outdoor photo here, or click to browse files (JPG, JPEG, PNG, WEBP)",
     type=["jpg", "jpeg", "png", "webp"],
+    key="main_uploader",
     help="Upload a single outdoor photograph containing reference & target objects."
 )
+
+st.sidebar.markdown("---")
+sidebar_uploaded_file = st.sidebar.file_uploader(
+    "Choose Outdoor Image",
+    type=["jpg", "jpeg", "png", "webp"],
+    key="sidebar_uploader",
+    help="Upload a single outdoor photograph containing reference & target objects."
+)
+
+# Use main uploader if provided, otherwise fallback to sidebar uploader
+uploaded_file = main_uploaded_file if main_uploaded_file is not None else sidebar_uploaded_file
 
 input_image_path = config.INPUT_DIR / "uploaded_input.jpg"
 

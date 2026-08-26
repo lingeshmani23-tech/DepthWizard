@@ -334,6 +334,63 @@
             font-size: 0.8rem;
         }
 
+        /* Upload Dropzone */
+        .upload-box {
+            background: rgba(15, 23, 42, 0.85);
+            border: 2px dashed var(--primary);
+            border-radius: 16px;
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            margin-bottom: 2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .upload-box:hover {
+            background: rgba(56, 189, 248, 0.1);
+            border-color: #818CF8;
+            transform: translateY(-2px);
+        }
+        .upload-icon {
+            font-size: 3rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+        .upload-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 0.4rem;
+        }
+        .upload-sub {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            margin-bottom: 1.2rem;
+        }
+        .btn-upload {
+            background: var(--primary-gradient);
+            color: #fff;
+            border: none;
+            padding: 0.7rem 1.8rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 14px rgba(56, 189, 248, 0.3);
+        }
+        .validation-banner {
+            display: none;
+            background: rgba(52, 211, 153, 0.15);
+            border: 1px solid var(--success);
+            color: var(--success);
+            padding: 0.8rem 1.2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-top: 1rem;
+            text-align: center;
+        }
+
         /* Footer */
         footer {
             text-align: center;
@@ -365,6 +422,16 @@
             <span class="badge"><i class="fa-solid fa-trophy"></i> Smart India Hackathon Prototype</span>
             <h1>Single-View Height Estimation & 3D Flythrough</h1>
             <p>Predict monocular metric depth, back-project 3D perspective geometry, calibrate absolute target scale, reconstruct point clouds, and render virtual camera flythroughs from a single RGB photo.</p>
+        </div>
+
+        <!-- Upload Dropzone Section -->
+        <div class="upload-box" onclick="document.getElementById('imageInput').click()" id="dropzone">
+            <input type="file" id="imageInput" accept="image/png, image/jpeg, image/jpg, image/webp" style="display:none;" onchange="handleImageUpload(event)">
+            <div class="upload-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+            <div class="upload-title">Upload Outdoor RGB Image</div>
+            <div class="upload-sub">Drag and drop your outdoor photo here, or click to browse files (JPG, JPEG, PNG, WEBP)</div>
+            <button class="btn-upload" type="button"><i class="fa-solid fa-folder-open"></i> Select Outdoor Photo</button>
+            <div id="validationBanner" class="validation-banner"><i class="fa-solid fa-circle-check"></i> <span id="validationMsg">✓ Image successfully loaded</span></div>
         </div>
 
         <!-- Metrics Overview -->
@@ -549,6 +616,82 @@ Single Outdoor RGB Image ──► Depth Anything V2 Metric Outdoor Model (PyTor
             if(tabName === 'tab-pointcloud') {
                 onWindowResize();
             }
+        }
+
+        // Image Upload Handler
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const banner = document.getElementById('validationBanner');
+                    const msg = document.getElementById('validationMsg');
+                    if (banner && msg) {
+                        msg.innerText = `✓ Image successfully loaded (${img.width} x ${img.height} px, RGB Format — ${file.name})`;
+                        banner.style.display = 'block';
+                    }
+                    if (scene && points) {
+                        scene.remove(points);
+                        generatePointCloudForImage(img);
+                    }
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function generatePointCloudForImage(img) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const w = 120, h = 90;
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(img, 0, 0, w, h);
+            const imgData = ctx.getImageData(0, 0, w, h).data;
+
+            const count = w * h;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+
+            let idx = 0;
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const i = (y * w + x) * 4;
+                    const r = imgData[i] / 255.0;
+                    const g = imgData[i + 1] / 255.0;
+                    const b = imgData[i + 2] / 255.0;
+
+                    const u = (x / w - 0.5) * 6;
+                    const v = -(y / h - 0.5) * 4;
+                    const z = 1.5 + (0.299 * r + 0.587 * g + 0.114 * b) * 3.5;
+
+                    positions[idx * 3] = u;
+                    positions[idx * 3 + 1] = v;
+                    positions[idx * 3 + 2] = -z;
+
+                    colors[idx * 3] = r;
+                    colors[idx * 3 + 1] = g;
+                    colors[idx * 3 + 2] = b;
+                    idx++;
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.04,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.9
+            });
+
+            points = new THREE.Points(geometry, material);
+            scene.add(points);
         }
 
         // Three.js Point Cloud Scene Generator
