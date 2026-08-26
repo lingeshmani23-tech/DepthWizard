@@ -9,9 +9,15 @@ import torch
 # Base Directory (Project Root)
 BASE_DIR = Path(__file__).resolve().parent
 
+# Demonstration Mode Setting ("LIVE" for full GPU pipeline, "FAST" for cached result demonstration)
+DEMO_MODE = "LIVE"
+
 # Directory Paths
 INPUT_DIR = BASE_DIR / "input"
 OUTPUT_DIR = BASE_DIR / "output"
+OUTPUTS_DIR = BASE_DIR / "outputs"
+CACHE_DIR = BASE_DIR / "cache"
+DEMO_REPORT_DIR = OUTPUTS_DIR / "demo_report"
 SCRIPTS_DIR = BASE_DIR / "scripts"
 APP_DIR = BASE_DIR / "app"
 ASSETS_DIR = BASE_DIR / "assets"
@@ -19,7 +25,7 @@ EVALUATION_DIR = BASE_DIR / "evaluation"
 MODELS_DIR = BASE_DIR / "models"
 
 # Ensure all essential directories exist
-for folder in [INPUT_DIR, OUTPUT_DIR, SCRIPTS_DIR, APP_DIR, ASSETS_DIR, EVALUATION_DIR, MODELS_DIR]:
+for folder in [INPUT_DIR, OUTPUT_DIR, OUTPUTS_DIR, CACHE_DIR, DEMO_REPORT_DIR, SCRIPTS_DIR, APP_DIR, ASSETS_DIR, EVALUATION_DIR, MODELS_DIR]:
     folder.mkdir(parents=True, exist_ok=True)
 
 # Model Settings

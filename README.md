@@ -8,13 +8,22 @@
 
 DEPTHWIZARD is a computer vision and monocular 3D geometry prototype that estimates target object heights, reconstructs 3D point cloud scenes, and generates virtual camera flythrough videos from a **single outdoor RGB image**.
 
+### 🚀 SIH Demonstration Commands
+
+```bash
+# 🏆 PRIMARY AUTOMATIC SIH DEMO (Zero manual input required)
+python demo.py
+
+# 🎮 OPTIONAL INTERACTIVE GUI (Streamlit interface)
+streamlit run app.py
+```
+
+---
+
 ### 🌐 Live Deployment Links
+- **Vercel Production Showcase**: [https://depth-wizard.vercel.app](https://depth-wizard.vercel.app)
 - **GitHub Pages Interactive Showcase**: [https://lingeshmani23-tech.github.io/DepthWizard/](https://lingeshmani23-tech.github.io/DepthWizard/)
-- **Streamlit Community Cloud Deployment**:
-  1. Open [Streamlit Community Cloud](https://share.streamlit.io/).
-  2. Select Repository: `lingeshmani23-tech/DepthWizard`.
-  3. Set Main file path: `app/app.py`.
-  4. Click **Deploy!**
+- **Streamlit Community Cloud Deployment**: Main file path `app/app.py`
 
 ---
 
