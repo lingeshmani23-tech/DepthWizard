@@ -1,0 +1,3 @@
+Image,Description,Reference Object,Reference Height (m),Actual Target Height (m),Estimated Height (m),Absolute Error (m),Error %
+test.jpg,Person standing near door/building,Known Reference,1.7,2.45,2.392,0.058,2.37
+sample_street_scene.jpg,Traffic pole and bus stop shelter,Known Reference,3.0,2.6,2.475,0.125,4.79

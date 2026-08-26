@@ -1,0 +1,23 @@
+{
+  "reference_top": [
+    30,
+    20
+  ],
+  "reference_bottom": [
+    30,
+    80
+  ],
+  "reference_pixel_height": 60.0,
+  "reference_depth": 3.7103,
+  "reference_height_m": 1.7,
+  "scale_factor": 0.33274,
+  "focal_length_px": 86.6,
+  "camera_intrinsics": {
+    "fx": 86.60254037844388,
+    "fy": 86.60254037844388,
+    "cx": 50.0,
+    "cy": 50.0,
+    "fov_deg": 60.0
+  },
+  "calibration_method": "Pinhole Back-Projection Calibration"
+}

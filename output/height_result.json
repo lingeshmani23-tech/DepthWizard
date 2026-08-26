@@ -1,0 +1,27 @@
+{
+  "reference_height_m": 1.8,
+  "reference_measurement": 4.3712543702234665,
+  "calibration_scale": 0.41178111533874906,
+  "target_measurement": 5.683621948628315,
+  "estimated_target_height_m": 2.340408185169962,
+  "reference_coords": {
+    "top": [
+      136,
+      55
+    ],
+    "bottom": [
+      136,
+      138
+    ]
+  },
+  "target_coords": {
+    "top": [
+      192,
+      37
+    ],
+    "bottom": [
+      192,
+      166
+    ]
+  }
+}

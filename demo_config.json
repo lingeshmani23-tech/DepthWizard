@@ -1,0 +1,24 @@
+{
+  "demo_images": [
+    {
+      "name": "sample_person_building.jpg",
+      "description": "Person standing near building entrance",
+      "reference_height_m": 1.70,
+      "reference_top": [180, 150],
+      "reference_bottom": [185, 420],
+      "target_top": [450, 60],
+      "target_bottom": [460, 430],
+      "known_target_height_m": 5.50
+    },
+    {
+      "name": "sample_street_scene.jpg",
+      "description": "Pedestrian next to traffic light pole",
+      "reference_height_m": 1.75,
+      "reference_top": [120, 200],
+      "reference_bottom": [125, 450],
+      "target_top": [380, 100],
+      "target_bottom": [390, 480],
+      "known_target_height_m": 3.80
+    }
+  ]
+}

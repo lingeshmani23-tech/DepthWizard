@@ -1,0 +1,25 @@
+# Environments
+venv/
+ENV/
+env/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Model Checkpoints & Large Binaries
+models/*.bin
+models/*.safetensors
+models/*.pth
+models/*.onnx
+
+# IDE & Logs
+.vscode/
+.idea/
+*.log
+.DS_Store
+
+# Temporary outputs (optional caches)
+scratch/

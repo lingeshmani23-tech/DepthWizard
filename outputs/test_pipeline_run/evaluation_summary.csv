@@ -1,0 +1,2 @@
+image_name,reference_height_m,estimated_height_m,known_height_m,absolute_error_m,percentage_error
+test_scene,1.7,1.07,2.2,1.13,51.36
