@@ -2,7 +2,19 @@
 
 > **Smart India Hackathon (SIH) Prototype Submission**
 
+[![GitHub Pages Showcase](https://img.shields.io/badge/GitHub%20Pages-Live%20Showcase-38BDF8?style=for-the-badge&logo=github)](https://lingeshmani23-tech.github.io/DepthWizard/)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/)
+[![Repository](https://img.shields.io/badge/GitHub-DepthWizard-indigo?style=for-the-badge&logo=github)](https://github.com/lingeshmani23-tech/DepthWizard)
+
 DEPTHWIZARD is a computer vision and monocular 3D geometry prototype that estimates target object heights, reconstructs 3D point cloud scenes, and generates virtual camera flythrough videos from a **single outdoor RGB image**.
+
+### 🌐 Live Deployment Links
+- **GitHub Pages Interactive Showcase**: [https://lingeshmani23-tech.github.io/DepthWizard/](https://lingeshmani23-tech.github.io/DepthWizard/)
+- **Streamlit Community Cloud Deployment**:
+  1. Open [Streamlit Community Cloud](https://share.streamlit.io/).
+  2. Select Repository: `lingeshmani23-tech/DepthWizard`.
+  3. Set Main file path: `app/app.py`.
+  4. Click **Deploy!**
 
 ---
 
