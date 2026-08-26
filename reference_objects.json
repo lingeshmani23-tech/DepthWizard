@@ -1,0 +1,32 @@
+{
+  "person": {
+    "display_name": "Person",
+    "default_height_m": 1.70,
+    "range_m": [1.50, 2.00],
+    "priority": 1
+  },
+  "car": {
+    "display_name": "Car / Sedan",
+    "default_height_m": 1.50,
+    "range_m": [1.30, 1.80],
+    "priority": 2
+  },
+  "door": {
+    "display_name": "Standard Door",
+    "default_height_m": 2.00,
+    "range_m": [1.80, 2.30],
+    "priority": 3
+  },
+  "bus": {
+    "display_name": "Transit Bus",
+    "default_height_m": 3.20,
+    "range_m": [2.80, 3.60],
+    "priority": 4
+  },
+  "traffic light": {
+    "display_name": "Traffic Light",
+    "default_height_m": 2.50,
+    "range_m": [2.00, 3.00],
+    "priority": 5
+  }
+}

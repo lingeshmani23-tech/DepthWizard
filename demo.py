@@ -45,23 +45,25 @@ def print_banner():
     print("=" * 50)
 
 
-def run_sih_demo():
+def run_sih_demo(custom_image_path=None):
     print_banner()
 
-    # 1. Load Demo Config & Image
-    print("[1/8] Loading demo image.............. ", end="", flush=True)
+    # 1. Load Image & Config
+    print("[1/8] Loading image................... ", end="", flush=True)
     config_path = BASE_DIR / "demo_config.json"
-    if not config_path.exists():
-        print("✗")
-        raise FileNotFoundError(f"Missing demo configuration at {config_path}")
+    demo_cfg = {}
+    if config_path.exists():
+        with open(config_path) as f:
+            demo_cfg = json.load(f)
 
-    with open(config_path) as f:
-        demo_cfg = json.load(f)
+    if custom_image_path:
+        img_path = Path(custom_image_path)
+    else:
+        img_path = BASE_DIR / demo_cfg.get("image", "sample_images/sih_demo.jpg")
 
-    img_path = BASE_DIR / demo_cfg["image"]
     if not img_path.exists():
-        print("✗")
-        raise FileNotFoundError(f"Demo image missing at {img_path}")
+        print("[FAIL]")
+        raise FileNotFoundError(f"Image missing at {img_path}")
 
     pil_img, np_img = load_image(str(img_path))
     h, w = np_img.shape[:2]
@@ -251,4 +253,9 @@ def run_sih_demo():
 
 
 if __name__ == "__main__":
-    run_sih_demo()
+    import argparse
+    parser = argparse.ArgumentParser(description="DEPTHWIZARD — Single-View Height Estimation & 3D Flythrough Demo")
+    parser.add_argument("--image", type=str, default=None, help="Path to input outdoor RGB image")
+    args = parser.parse_args()
+
+    run_sih_demo(custom_image_path=args.image)

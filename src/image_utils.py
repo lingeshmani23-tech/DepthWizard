@@ -4,7 +4,7 @@ Handles multi-format RGB image loading, resolution normalization, and depth arra
 """
 
 import os
-from typing import Tuple, Union
+from typing import Tuple, Union, Optional
 import numpy as np
 from PIL import Image, ImageOps
 import cv2
@@ -37,6 +37,29 @@ def load_image(image_input: Union[str, bytes, Image.Image]) -> Tuple[Image.Image
 
     np_img = np.array(pil_img)
     return pil_img, np_img
+
+
+def validate_image(image_input: Union[str, bytes, Image.Image]) -> Tuple[bool, str, Optional[Image.Image], Optional[np.ndarray]]:
+    """
+    Validates uploaded outdoor image.
+    Verifies decoding, RGB 3-channel layout, resolution, and absence of corruption.
+
+    Returns:
+        Tuple of (is_valid: bool, status_message: str, pil_img, np_img)
+    """
+    try:
+        pil_img, np_img = load_image(image_input)
+        h, w, c = np_img.shape
+
+        if c != 3:
+            return False, f"Image must be 3-channel RGB. Found {c} channels.", None, None
+
+        if w < 64 or h < 64:
+            return False, f"Image resolution ({w}x{h}) is too low for depth estimation. Minimum is 64x64.", None, None
+
+        return True, "✓ Image successfully loaded", pil_img, np_img
+    except Exception as e:
+        return False, f"Image validation error: {str(e)}", None, None
 
 
 def preprocess_image(np_img: np.ndarray, max_dim: int = 1024) -> Tuple[np.ndarray, float]:
