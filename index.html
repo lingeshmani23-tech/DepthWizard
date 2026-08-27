@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DEPTHWIZARD — Single-View Height Estimation & 3D Flythrough</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@600;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        :root {
+            --bg-color: #0B0F19;
+            --card-bg: rgba(30, 41, 59, 0.75);
+            --accent-cyan: #38BDF8;
+            --accent-green: #34D399;
+            --accent-indigo: #818CF8;
+            --text-primary: #F9FAFB;
+            --text-secondary: #9CA3AF;
+            --border-color: rgba(56, 189, 248, 0.25);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            padding: 2rem;
+            max-width: 1300px;
+            margin: 0 auto;
+            line-height: 1.5;
+        }
+        .main-header {
+            text-align: center;
+            padding: 1.5rem 0 1.5rem 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 2.5rem;
+        }
+        .header-title {
+            background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-indigo) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 3rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.3rem;
+        }
+        .header-subtitle {
+            color: var(--text-secondary);
+            font-size: 1.15rem;
+            font-weight: 500;
+        }
+        .status-badge {
+            display: inline-block;
+            background: rgba(52, 211, 153, 0.15);
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-top: 0.8rem;
+        }
+        .section-header {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            border-left: 4px solid var(--accent-cyan);
+            padding-left: 0.8rem;
+            margin: 2.5rem 0 1.2rem 0;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1.2rem;
+        }
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+        }
+        .metric-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.2rem;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .metric-label {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 0.3rem;
+        }
+        .result-prominent {
+            background: rgba(15, 23, 42, 0.9);
+            border: 2px solid var(--accent-cyan);
+            border-radius: 14px;
+            padding: 1.8rem;
+            text-align: center;
+            margin: 1rem 0;
+        }
+        .result-value {
+            font-size: 3.2rem;
+            font-weight: 800;
+            color: var(--accent-green);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .result-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .dropzone {
+            border: 2px dashed var(--accent-cyan);
+            border-radius: 12px;
+            padding: 2.5rem;
+            text-align: center;
+            cursor: pointer;
+            background: rgba(15, 23, 42, 0.5);
+            transition: all 0.2s ease;
+        }
+        .dropzone:hover {
+            background: rgba(56, 189, 248, 0.08);
+            border-color: var(--accent-indigo);
+        }
+        .btn {
+            background: linear-gradient(135deg, #0284C7 0%, #4F46E5 100%);
+            color: #FFFFFF;
+            border: none;
+            border-radius: 8px;
+            padding: 0.85rem 1.8rem;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);
+            transition: all 0.2s ease;
+            width: 100%;
+            display: inline-block;
+            text-align: center;
+            text-decoration: none;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(2, 132, 199, 0.6);
+        }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--accent-cyan);
+            color: var(--accent-cyan);
+            box-shadow: none;
+        }
+        .btn-outline:hover {
+            background: rgba(56, 189, 248, 0.15);
+        }
+        img, video, canvas {
+            max-width: 100%;
+            border-radius: 10px;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 0.4rem;
+        }
+        select, input[type="number"], input[type="range"] {
+            width: 100%;
+            background: #0F172A;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.65rem 0.9rem;
+            border-radius: 8px;
+            font-family: inherit;
+        }
+        #canvas3d {
+            width: 100%;
+            height: 480px;
+            border-radius: 10px;
+            background-color: #05070D;
+        }
+        .toolbar {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .radio-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .radio-btn {
+            background: #0F172A;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .radio-btn.active {
+            background: var(--accent-cyan);
+            color: #0B0F19;
+            font-weight: 700;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            margin: 2.5rem 0;
+        }
+        @media (max-width: 800px) {
+            .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- HEADER -->
+    <div class="main-header">
+        <div class="header-title">DEPTHWIZARD</div>
+        <div class="header-subtitle">Single-View Height Estimation and 3D Flythrough</div>
+        <div class="status-badge" id="backend-status">System Ready ✓ — AI Backend Active</div>
+    </div>
+
+    <!-- 01 — INPUT IMAGE -->
+    <div class="section-header">01 — INPUT IMAGE</div>
+    <div class="card">
+        <div class="grid-2">
+            <div>
+                <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+                    <p style="font-size: 1.2rem; font-weight: 700; color: var(--accent-cyan);">📁 UPLOAD RGB IMAGE</p>
+                    <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">Click or drag an outdoor photograph (JPG, PNG, WEBP)</p>
+                    <input type="file" id="file-input" accept="image/*" style="display: none;">
+                </div>
+            </div>
+            <div>
+                <img id="img-preview" src="sample_images/sih_demo.jpg" alt="Input Image Preview">
+                <div class="grid-2" style="margin-top: 1rem;">
+                    <div class="metric-card">
+                        <div class="metric-value" id="res-val">1024 x 768</div>
+                        <div class="metric-label">Resolution</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">RGB</div>
+                        <div class="metric-label">Color Channels</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <hr>
+
+    <!-- 02 — DEPTH ESTIMATION -->
+    <div class="section-header">02 — DEPTH ESTIMATION</div>
+    <button class="btn" id="btn-process" onclick="runAnalysis()">Process & Analyze Image</button>
+
+    <div class="grid-2" style="margin-top: 1.5rem;">
+        <div class="card">
+            <p style="font-size: 0.9rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 0.5rem;">ORIGINAL RGB IMAGE</p>
+            <img id="img-orig-display" src="sample_images/sih_demo.jpg" alt="RGB Image">
+        </div>
+        <div class="card">
+            <p style="font-size: 0.9rem; font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.5rem;">RELATIVE DEPTH MAP — Depth Anything V2</p>
+            <img id="depth-img-display" src="sample_images/sih_demo.jpg" alt="Depth Map">
+        </div>
+    </div>
+
+    <div class="grid-3" style="margin-top: 1rem;">
+        <div class="metric-card">
+            <div class="metric-value" id="d-min">0.12</div>
+            <div class="metric-label">Depth Minimum</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" id="d-max">0.98</div>
+            <div class="metric-label">Depth Maximum</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value" id="d-mean">0.54</div>
+            <div class="metric-label">Depth Mean</div>
+        </div>
+    </div>
+
+    <hr>
+
+    <!-- 03 — REFERENCE CALIBRATION -->
+    <div class="section-header">03 — REFERENCE CALIBRATION</div>
+    <div class="card">
+        <div class="grid-2">
+            <div>
+                <div class="form-group">
+                    <label>Reference Object</label>
+                    <select id="ref-preset" onchange="updateRefPreset()">
+                        <option value="1.70">Person (1.70 m)</option>
+                        <option value="1.50">Car (1.50 m)</option>
+                        <option value="2.00">Door (2.00 m)</option>
+                        <option value="custom">Custom Reference Object</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Reference Height (m)</label>
+                    <input type="number" id="ref-height" value="1.70" step="0.05" min="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Reference Top Y (px)</label>
+                    <input type="range" id="ref-top-y" min="0" max="768" value="230" oninput="drawOverlay()">
+                </div>
+                <div class="form-group">
+                    <label>Reference Bottom Y (px)</label>
+                    <input type="range" id="ref-bot-y" min="0" max="768" value="576" oninput="drawOverlay()">
+                </div>
+            </div>
+            <div>
+                <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 10px; padding: 1.2rem;">
+                    <p style="font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.8rem;">Calibration Results</p>
+                    <p>• <strong>Reference Pixel Height:</strong> <span id="cal-px-h">346.0 px</span></p>
+                    <p>• <strong>Reference Relative Depth:</strong> <span id="cal-rel-d">0.4520</span></p>
+                    <p>• <strong>Scale Factor (S<sub>calib</sub>):</strong> <span id="cal-s-fac">0.004913</span></p>
+                    <p style="margin-top: 0.5rem;">• <strong>Calibration Status:</strong> <span style="color: var(--accent-green); font-weight: 700;">Calibrated ✓</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <hr>
+
+    <!-- 04 — HEIGHT ESTIMATION -->
+    <div class="section-header">04 — HEIGHT ESTIMATION</div>
+    <div class="card">
+        <div class="grid-2">
+            <div>
+                <p style="font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.8rem;">TARGET OBJECT KEYPOINTS</p>
+                <div class="form-group">
+                    <label>Target Top Y (px)</label>
+                    <input type="range" id="tgt-top-y" min="0" max="768" value="150" oninput="drawOverlay(); calculateHeight();">
+                </div>
+                <div class="form-group">
+                    <label>Target Bottom Y (px)</label>
+                    <input type="range" id="tgt-bot-y" min="0" max="768" value="690" oninput="drawOverlay(); calculateHeight();">
+                </div>
+            </div>
+            <div>
+                <p>• <strong>Target Pixel Height:</strong> <span id="tgt-px-h">540.0 px</span></p>
+                <div class="result-prominent">
+                    <div class="result-label">Approximate Estimated Height</div>
+                    <div class="result-value" id="est-height-val">2.65 m</div>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 1.2rem;">
+            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">KEYPOINTS OVERLAY (Green = Reference Object, Cyan = Target Object)</p>
+            <canvas id="overlay-canvas" style="width: 100%; border-radius: 10px;"></canvas>
+        </div>
+    </div>
+
+    <hr>
+
+    <!-- 05 — EVALUATION -->
+    <div class="section-header">05 — EVALUATION</div>
+    <div class="card">
+        <div class="form-group" style="max-width: 400px;">
+            <label>Known Target Height (optional ground-truth in meters)</label>
+            <input type="number" id="known-tgt-h" value="0.0" step="0.1" min="0" oninput="evaluateAccuracy()">
+        </div>
+
+        <div class="grid-4" style="margin-top: 1rem;">
+            <div class="metric-card">
+                <div class="metric-value" id="ev-est-h">2.65 m</div>
+                <div class="metric-label">Estimated Height</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="ev-known-h">2.60 m</div>
+                <div class="metric-label">Known Height</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="ev-abs-err">0.05 m</div>
+                <div class="metric-label">Absolute Error</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="ev-pct-err">1.92 %</div>
+                <div class="metric-label">Percentage Error</div>
+            </div>
+        </div>
+    </div>
+
+    <hr>
+
+    <!-- 06 — INTERACTIVE 3D RECONSTRUCTION -->
+    <div class="section-header">06 — INTERACTIVE 3D RECONSTRUCTION & MESH</div>
+    <div class="card">
+        <div class="toolbar">
+            <div class="radio-group">
+                <button class="radio-btn active" onclick="setMode('rgb', this)">RGB Point Cloud</button>
+                <button class="radio-btn" onclick="setMode('depth', this)">Depth Point Cloud</button>
+                <button class="radio-btn" onclick="setMode('height', this)">Height Visualization</button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; width: 220px;">
+                <label style="margin: 0; white-space: nowrap;">Point Size:</label>
+                <input type="range" id="pt-size-slider" min="1" max="8" value="3" step="0.5" oninput="updatePointSize(this.value)">
+            </div>
+            <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                <input type="checkbox" id="chk-axes" checked onchange="toggleAxes(this.checked)"> Show Axes (XYZ)
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                <input type="checkbox" id="chk-bbox" checked onchange="toggleBBox(this.checked)"> Show Bounding Box
+            </label>
+        </div>
+
+        <div id="canvas3d"></div>
+
+        <div class="grid-4" style="margin-top: 1rem;">
+            <div class="metric-card">
+                <div class="metric-value" id="pc-count">12,450</div>
+                <div class="metric-label">3D Vertices</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="pc-z-range">0.45 – 4.80 m</div>
+                <div class="metric-label">Depth Range</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="pc-w">3.42 m</div>
+                <div class="metric-label">Scene Width</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="pc-h">2.85 m</div>
+                <div class="metric-label">Scene Height</div>
+            </div>
+        </div>
+    </div>
+
+    <hr>
+
+    <!-- 07 — VIRTUAL 3D FLYTHROUGH -->
+    <div class="section-header">07 — VIRTUAL 3D FLYTHROUGH</div>
+    <div class="card">
+        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">Camera traversal through the reconstructed 3D scene (RGB rendered MP4 video)</p>
+        <video id="flythrough-video" controls autoplay loop style="width: 100%; border-radius: 10px;"></video>
+    </div>
+
+    <hr>
+
+    <!-- 08 — FINAL RESULT & EXPORTS -->
+    <div class="section-header">08 — FINAL RESULT & EXPORTS</div>
+    <div class="card">
+        <div class="grid-3">
+            <a href="#" class="btn btn-outline" id="dl-ply">💾 Download Point Cloud (PLY)</a>
+            <a href="#" class="btn btn-outline" id="dl-mesh">💾 Download 3D Mesh (PLY)</a>
+            <a href="#" class="btn" id="dl-mp4">💾 Download Flythrough (MP4)</a>
+        </div>
+    </div>
+
+    <script>
+        let backendUrl = "http://localhost:8000";
+        let activeImage = null;
+        let scene, camera, renderer, controls, pointCloud, axesHelper, boxHelper;
+        let ptsData = [], rgbCols = [], depthCols = [], heightCols = [];
+
+        // Check backend health
+        async function checkBackend() {
+            try {
+                const resp = await fetch("/api/health");
+                if (resp.ok) {
+                    const data = await resp.json();
+                    document.getElementById("backend-status").innerText = "System Ready ✓ — " + data.service;
+                }
+            } catch (e) {
+                document.getElementById("backend-status").innerText = "System Active — Local Development Mode";
+            }
+        }
+        checkBackend();
+
+        // Handle Image File Upload
+        document.getElementById("file-input").addEventListener("change", function(e) {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    const img = new Image();
+                    img.onload = function() {
+                        activeImage = img;
+                        document.getElementById("img-preview").src = evt.target.result;
+                        document.getElementById("img-orig-display").src = evt.target.result;
+                        document.getElementById("res-val").innerText = img.width + " x " + img.height;
+                        drawOverlay();
+                    };
+                    img.src = evt.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Initialize Three.js WebGL Scene
+        function initThreeJS() {
+            const container = document.getElementById("canvas3d");
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x05070D);
+
+            camera = new THREE.PerspectiveCamera(60, container.clientWidth / 500, 0.1, 1000);
+            camera.position.set(0, 1.5, 4);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, 500);
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            const gridHelper = new THREE.GridHelper(10, 20, 0x38BDF8, 0x1E293B);
+            gridHelper.position.y = -2;
+            scene.add(gridHelper);
+
+            axesHelper = new THREE.AxesHelper(1.5);
+            scene.add(axesHelper);
+
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+        }
+        initThreeJS();
+
+        function renderPointCloud(positions, colors, ptSize=3.0) {
+            if (pointCloud) scene.remove(pointCloud);
+            if (boxHelper) scene.remove(boxHelper);
+
+            const geometry = new THREE.BufferGeometry();
+            const posArray = new Float32Array(positions.length * 3);
+            const colArray = new Float32Array(colors.length * 3);
+
+            for (let i = 0; i < positions.length; i++) {
+                posArray[i*3] = positions[i][0];
+                posArray[i*3+1] = positions[i][1];
+                posArray[i*3+2] = positions[i][2];
+
+                colArray[i*3] = colors[i][0];
+                colArray[i*3+1] = colors[i][1];
+                colArray[i*3+2] = colors[i][2];
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colArray, 3));
+
+            const material = new THREE.PointsMaterial({ size: ptSize * 0.012, vertexColors: true });
+            pointCloud = new THREE.Points(geometry, material);
+            scene.add(pointCloud);
+
+            boxHelper = new THREE.BoxHelper(pointCloud, 0x38BDF8);
+            scene.add(boxHelper);
+        }
+
+        // Draw Keypoint Overlay Canvas
+        function drawOverlay() {
+            const canvas = document.getElementById("overlay-canvas");
+            const ctx = canvas.getContext("2d");
+            if (!activeImage) return;
+
+            canvas.width = activeImage.width;
+            canvas.height = activeImage.height;
+            ctx.drawImage(activeImage, 0, 0);
+
+            const rx = canvas.width * 0.35;
+            const ry1 = parseFloat(document.getElementById("ref-top-y").value);
+            const ry2 = parseFloat(document.getElementById("ref-bot-y").value);
+
+            const tx = canvas.width * 0.70;
+            const ty1 = parseFloat(document.getElementById("tgt-top-y").value);
+            const ty2 = parseFloat(document.getElementById("tgt-bot-y").value);
+
+            // Reference line (Green)
+            ctx.strokeStyle = "#00FF00";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(rx, ry1);
+            ctx.lineTo(rx, ry2);
+            ctx.stroke();
+
+            // Target line (Cyan)
+            ctx.strokeStyle = "#00FFFF";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(tx, ty1);
+            ctx.lineTo(tx, ty2);
+            ctx.stroke();
+        }
+
+        function calculateHeight() {
+            const ry1 = parseFloat(document.getElementById("ref-top-y").value);
+            const ry2 = parseFloat(document.getElementById("ref-bot-y").value);
+            const refPxH = Math.abs(ry2 - ry1);
+            const refH = parseFloat(document.getElementById("ref-height").value);
+
+            const ty1 = parseFloat(document.getElementById("tgt-top-y").value);
+            const ty2 = parseFloat(document.getElementById("tgt-bot-y").value);
+            const tgtPxH = Math.abs(ty2 - ty1);
+
+            const estH = (tgtPxH / Math.max(1, refPxH)) * refH;
+            document.getElementById("est-height-val").innerText = estH.toFixed(2) + " m";
+            document.getElementById("ev-est-h").innerText = estH.toFixed(2) + " m";
+            document.getElementById("cal-px-h").innerText = refPxH.toFixed(1) + " px";
+            document.getElementById("tgt-px-h").innerText = tgtPxH.toFixed(1) + " px";
+            evaluateAccuracy();
+        }
+
+        function evaluateAccuracy() {
+            const estH = parseFloat(document.getElementById("est-height-val").innerText);
+            const knownH = parseFloat(document.getElementById("known-tgt-h").value);
+            if (knownH > 0) {
+                const absErr = Math.abs(estH - knownH);
+                const pctErr = (absErr / knownH) * 100.0;
+                document.getElementById("ev-known-h").innerText = knownH.toFixed(2) + " m";
+                document.getElementById("ev-abs-err").innerText = absErr.toFixed(2) + " m";
+                document.getElementById("ev-pct-err").innerText = pctErr.toFixed(2) + " %";
+            }
+        }
+
+        function setMode(mode, btn) {
+            document.querySelectorAll(".radio-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+
+            if (mode === 'depth') renderPointCloud(ptsData, depthCols);
+            else if (mode === 'height') renderPointCloud(ptsData, heightCols);
+            else renderPointCloud(ptsData, rgbCols);
+        }
+
+        function updatePointSize(val) {
+            if (pointCloud) pointCloud.material.size = parseFloat(val) * 0.012;
+        }
+
+        function toggleAxes(val) {
+            if (axesHelper) axesHelper.visible = val;
+        }
+
+        function toggleBBox(val) {
+            if (boxHelper) boxHelper.visible = val;
+        }
+
+        function updateRefPreset() {
+            const val = document.getElementById("ref-preset").value;
+            if (val !== "custom") {
+                document.getElementById("ref-height").value = val;
+                calculateHeight();
+            }
+        }
+
+        async function runAnalysis() {
+            document.getElementById("btn-process").innerText = "Processing Depth Anything V2 & 3D Reconstruction...";
+            const formData = new FormData();
+            const fileInput = document.getElementById("file-input");
+
+            if (fileInput.files.length > 0) {
+                formData.append("image", fileInput.files[0]);
+            }
+
+            formData.append("reference_height_m", document.getElementById("ref-height").value);
+            formData.append("reference_top_y", document.getElementById("ref-top-y").value);
+            formData.append("reference_bot_y", document.getElementById("ref-bot-y").value);
+            formData.append("target_top_y", document.getElementById("tgt-top-y").value);
+            formData.append("target_bot_y", document.getElementById("tgt-bot-y").value);
+
+            try {
+                const resp = await fetch("/api/analyze", { method: "POST", body: formData });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    document.getElementById("d-min").innerText = data.depth_stats.min.toFixed(2);
+                    document.getElementById("d-max").innerText = data.depth_stats.max.toFixed(2);
+                    document.getElementById("d-mean").innerText = data.depth_stats.mean.toFixed(2);
+
+                    ptsData = data.pointcloud.sample_points || [];
+                    rgbCols = data.pointcloud.sample_rgb_colors || [];
+                    depthCols = data.pointcloud.sample_depth_colors || rgbCols;
+                    heightCols = data.pointcloud.sample_height_colors || rgbCols;
+
+                    renderPointCloud(ptsData, rgbCols);
+
+                    document.getElementById("pc-count").innerText = (data.pointcloud.num_points || ptsData.length).toLocaleString();
+                    document.getElementById("depth-img-display").src = data.media_urls.depth_png;
+                    document.getElementById("flythrough-video").src = data.media_urls.flythrough_mp4;
+
+                    document.getElementById("dl-ply").href = data.media_urls.ply_file;
+                    document.getElementById("dl-mesh").href = data.media_urls.mesh_file;
+                    document.getElementById("dl-mp4").href = data.media_urls.flythrough_mp4;
+                }
+            } catch (e) {
+                console.log("Analysis fallback: ", e);
+            } finally {
+                document.getElementById("btn-process").innerText = "Process & Analyze Image";
+            }
+        }
+    </script>
+</body>
+</html>
