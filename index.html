@@ -246,7 +246,7 @@
     <div class="main-header">
         <div class="header-title">DEPTHWIZARD</div>
         <div class="header-subtitle">Single-View Height Estimation and 3D Flythrough</div>
-        <div class="status-badge" id="backend-status">System Ready ✓ — AI Backend Active</div>
+        <div class="status-badge" id="backend-status">System Ready ✓ — Static Frontend Deployment</div>
     </div>
 
     <!-- 01 — INPUT IMAGE -->
@@ -478,21 +478,28 @@
     </div>
 
     <script>
-        let backendUrl = "http://localhost:8000";
+        // AI Backend base URL configuration
+        const getBackendUrl = () => {
+            return window.BACKEND_API_URL || window.env?.BACKEND_API_URL || "http://localhost:8000";
+        };
+
         let activeImage = null;
         let scene, camera, renderer, controls, pointCloud, axesHelper, boxHelper;
         let ptsData = [], rgbCols = [], depthCols = [], heightCols = [];
 
-        // Check backend health
+        // Direct CORS check to AI Backend
         async function checkBackend() {
+            const backendUrl = getBackendUrl();
             try {
-                const resp = await fetch("/api/health");
+                const resp = await fetch(backendUrl + "/api/health", { method: "GET" });
                 if (resp.ok) {
                     const data = await resp.json();
-                    document.getElementById("backend-status").innerText = "System Ready ✓ — " + data.service;
+                    document.getElementById("backend-status").innerText = "System Ready ✓ — AI Backend Active (" + (data.device_label || "CPU") + ")";
+                } else {
+                    document.getElementById("backend-status").innerText = "System Active — Local Mode";
                 }
             } catch (e) {
-                document.getElementById("backend-status").innerText = "System Active — Local Development Mode";
+                document.getElementById("backend-status").innerText = "System Active — Local Mode";
             }
         }
         checkBackend();
@@ -687,8 +694,10 @@
             formData.append("target_top_y", document.getElementById("tgt-top-y").value);
             formData.append("target_bot_y", document.getElementById("tgt-bot-y").value);
 
+            const backendUrl = getBackendUrl();
+
             try {
-                const resp = await fetch("/api/analyze", { method: "POST", body: formData });
+                const resp = await fetch(backendUrl + "/api/analyze", { method: "POST", body: formData });
                 if (resp.ok) {
                     const data = await resp.json();
                     document.getElementById("d-min").innerText = data.depth_stats.min.toFixed(2);
@@ -703,12 +712,14 @@
                     renderPointCloud(ptsData, rgbCols);
 
                     document.getElementById("pc-count").innerText = (data.pointcloud.num_points || ptsData.length).toLocaleString();
-                    document.getElementById("depth-img-display").src = data.media_urls.depth_png;
-                    document.getElementById("flythrough-video").src = data.media_urls.flythrough_mp4;
 
-                    document.getElementById("dl-ply").href = data.media_urls.ply_file;
-                    document.getElementById("dl-mesh").href = data.media_urls.mesh_file;
-                    document.getElementById("dl-mp4").href = data.media_urls.flythrough_mp4;
+                    const mediaBase = backendUrl;
+                    document.getElementById("depth-img-display").src = mediaBase + data.media_urls.depth_png;
+                    document.getElementById("flythrough-video").src = mediaBase + data.media_urls.flythrough_mp4;
+
+                    document.getElementById("dl-ply").href = mediaBase + data.media_urls.ply_file;
+                    document.getElementById("dl-mesh").href = mediaBase + data.media_urls.mesh_file;
+                    document.getElementById("dl-mp4").href = mediaBase + data.media_urls.flythrough_mp4;
                 }
             } catch (e) {
                 console.log("Analysis fallback: ", e);
