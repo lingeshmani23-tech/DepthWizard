@@ -163,7 +163,13 @@
             text-align: center;
             text-decoration: none;
         }
-        .btn:hover {
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        .btn:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(2, 132, 199, 0.6);
         }
@@ -173,7 +179,7 @@
             color: var(--accent-cyan);
             box-shadow: none;
         }
-        .btn-outline:hover {
+        .btn-outline:hover:not(:disabled) {
             background: rgba(56, 189, 248, 0.15);
         }
         img, video, canvas {
@@ -484,6 +490,7 @@
         };
 
         let activeImage = null;
+        let isProcessing = false;
         let scene, camera, renderer, controls, pointCloud, axesHelper, boxHelper;
         let ptsData = [], rgbCols = [], depthCols = [], heightCols = [];
 
@@ -516,6 +523,13 @@
                         document.getElementById("img-preview").src = evt.target.result;
                         document.getElementById("img-orig-display").src = evt.target.result;
                         document.getElementById("res-val").innerText = img.width + " x " + img.height;
+                        
+                        // Update range sliders max values to match actual image height
+                        document.getElementById("ref-top-y").max = img.height;
+                        document.getElementById("ref-bot-y").max = img.height;
+                        document.getElementById("tgt-top-y").max = img.height;
+                        document.getElementById("tgt-bot-y").max = img.height;
+
                         drawOverlay();
                     };
                     img.src = evt.target.result;
@@ -556,9 +570,22 @@
         }
         initThreeJS();
 
+        // WebGL Memory-Leak Free Point Cloud Renderer (Disposes Geometries & Materials)
         function renderPointCloud(positions, colors, ptSize=3.0) {
-            if (pointCloud) scene.remove(pointCloud);
-            if (boxHelper) scene.remove(boxHelper);
+            if (pointCloud) {
+                scene.remove(pointCloud);
+                if (pointCloud.geometry) pointCloud.geometry.dispose();
+                if (pointCloud.material) pointCloud.material.dispose();
+                pointCloud = null;
+            }
+            if (boxHelper) {
+                scene.remove(boxHelper);
+                if (boxHelper.geometry) boxHelper.geometry.dispose();
+                if (boxHelper.material) boxHelper.material.dispose();
+                boxHelper = null;
+            }
+
+            if (!positions || positions.length === 0) return;
 
             const geometry = new THREE.BufferGeometry();
             const posArray = new Float32Array(positions.length * 3);
@@ -660,7 +687,9 @@
         }
 
         function updatePointSize(val) {
-            if (pointCloud) pointCloud.material.size = parseFloat(val) * 0.012;
+            if (pointCloud && pointCloud.material) {
+                pointCloud.material.size = parseFloat(val) * 0.012;
+            }
         }
 
         function toggleAxes(val) {
@@ -680,7 +709,13 @@
         }
 
         async function runAnalysis() {
-            document.getElementById("btn-process").innerText = "Processing Depth Anything V2 & 3D Reconstruction...";
+            if (isProcessing) return;
+            isProcessing = true;
+
+            const btn = document.getElementById("btn-process");
+            btn.disabled = true;
+            btn.innerText = "Processing Depth Anything V2 & 3D Reconstruction...";
+
             const formData = new FormData();
             const fileInput = document.getElementById("file-input");
 
@@ -722,9 +757,11 @@
                     document.getElementById("dl-mp4").href = mediaBase + data.media_urls.flythrough_mp4;
                 }
             } catch (e) {
-                console.log("Analysis fallback: ", e);
+                console.log("Analysis error: ", e);
             } finally {
-                document.getElementById("btn-process").innerText = "Process & Analyze Image";
+                isProcessing = false;
+                btn.disabled = false;
+                btn.innerText = "Process & Analyze Image";
             }
         }
     </script>
