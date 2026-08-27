@@ -18,14 +18,30 @@ python demo.py
 streamlit run app.py
 ```
 
----
-
-### 🌐 Live Deployment Links
-- **Vercel Production Showcase**: [https://depth-wizard.vercel.app](https://depth-wizard.vercel.app)
+### 🌐 Public Deployment & Production Links
+- **Public Interactive Web Application**: [https://depth-wizard.vercel.app](https://depth-wizard.vercel.app)
 - **GitHub Pages Interactive Showcase**: [https://lingeshmani23-tech.github.io/DepthWizard/](https://lingeshmani23-tech.github.io/DepthWizard/)
-- **Streamlit Community Cloud Deployment**: Main file path `app/app.py`
+- **Streamlit Community Cloud Main App**: Main entry point `app.py`
 
 ---
+
+## 🚀 Public Deployment Guide
+
+DepthWizard is configured for cloud deployment without any localhost dependency.
+
+### Deployment Instructions:
+1. **Repository Setup**: Clone or fork `https://github.com/lingeshmani23-tech/DepthWizard`.
+2. **Install Dependencies**: `pip install -r requirements.txt`
+3. **Streamlit Server Binding**: `.streamlit/config.toml` automatically binds to `0.0.0.0` and reads dynamic server ports.
+4. **Deploy Command**: `streamlit run app.py --server.address=0.0.0.0`
+5. **Public Access**: Authentication is disabled by default (`PUBLIC ACCESS = ENABLED`). Anyone with the public URL can upload photos and run analysis.
+
+### System Architecture & Production Specifications:
+- **GPU Availability & CPU Fallback**: Automatically uses CUDA GPU (`NVIDIA RTX 4050`) when available; falls back smoothly to PyTorch CPU inference if CUDA is absent.
+- **Model Caching**: `@st.cache_resource` loads Hugging Face `Depth Anything V2` weights once per server instance, eliminating per-request downloads.
+- **Multi-User Safety**: Each visitor session operates in an isolated temporary directory (`outputs/session_<uuid>/`) preventing file clobbering.
+- **Resource Protection**: Heavy inference triggers only on clicking **🚀 Process & Analyze Image**, caching results in `st.session_state`.
+- **Upload Constraints**: Maximum upload file size of **20 MB** with format validation (`JPG`, `JPEG`, `PNG`, `WEBP`).
 
 ## 🌟 Key Features & Research Novelty
 

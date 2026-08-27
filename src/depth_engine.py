@@ -32,19 +32,18 @@ except ImportError:
 _MODEL_CACHE = {}
 
 
-def load_depth_model(model_id: str = MODEL_NAME):
+def _load_model_uncached(model_id: str):
     """
-    Load pretrained Depth Anything V2 model from Hugging Face transformers.
-    Cached in global memory dictionary to enforce ONE-TIME loading.
+    Core function to load pretrained Depth Anything V2 model from Hugging Face transformers.
+    Returns (processor, model, device, device_name, is_gpu).
     """
-    if model_id in _MODEL_CACHE:
-        return _MODEL_CACHE[model_id]
-
     try:
         import torch
         from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        is_gpu = torch.cuda.is_available()
+        device = "cuda" if is_gpu else "cpu"
+        device_name = torch.cuda.get_device_name(0) if is_gpu else "CPU Fallback"
         
         # Try HuggingFace Depth Anything V2 model
         try:
@@ -57,12 +56,49 @@ def load_depth_model(model_id: str = MODEL_NAME):
             model = AutoModelForDepthEstimation.from_pretrained(fallback_id).to(device)
 
         model.eval()
-        _MODEL_CACHE[model_id] = (processor, model, device)
-        return processor, model, device
+        return processor, model, device, device_name, is_gpu
     except Exception as e:
-        print(f"[DepthEngine Warning] PyTorch model loading error: {e}. Falling back to robust analytical depth engine.")
-        _MODEL_CACHE[model_id] = (None, None, "cpu")
-        return None, None, "cpu"
+        print(f"[DepthEngine Warning] PyTorch model loading error: {e}. Falling back to analytical depth engine.")
+        return None, None, "cpu", "CPU Fallback", False
+
+
+def load_depth_model(model_id: str = MODEL_NAME):
+    """
+    Load pretrained Depth Anything V2 model from Hugging Face transformers.
+    Cached in global memory dictionary or st.cache_resource to enforce ONE-TIME loading per process.
+    """
+    if model_id in _MODEL_CACHE:
+        return _MODEL_CACHE[model_id]
+
+    # Check if streamlit is active and use @st.cache_resource
+    try:
+        import streamlit as st
+        @st.cache_resource(show_spinner="Loading Depth Anything V2 Model Weights...")
+        def _cached_st_loader(m_id: str):
+            return _load_model_uncached(m_id)
+        
+        res = _cached_st_loader(model_id)
+        _MODEL_CACHE[model_id] = res
+        return res
+    except Exception:
+        res = _load_model_uncached(model_id)
+        _MODEL_CACHE[model_id] = res
+        return res
+
+
+def get_device_status(model_id: str = MODEL_NAME) -> Dict[str, Any]:
+    """
+    Return human-readable device and model health status.
+    """
+    processor, model, device, device_name, is_gpu = load_depth_model(model_id)
+    return {
+        "device": device,
+        "device_name": device_name,
+        "is_gpu": is_gpu,
+        "status_label": f"GPU: Available ({device_name})" if is_gpu else "GPU: CPU Fallback",
+        "model_loaded": model is not None,
+        "model_name": model_id
+    }
 
 
 def estimate_depth(rgb_img: np.ndarray, model_id: str = MODEL_NAME) -> np.ndarray:
@@ -71,7 +107,7 @@ def estimate_depth(rgb_img: np.ndarray, model_id: str = MODEL_NAME) -> np.ndarra
     Executes under torch.inference_mode().
     Returns raw 2D numerical depth float32 numpy array.
     """
-    processor, model, device = load_depth_model(model_id)
+    processor, model, device, device_name, is_gpu = load_depth_model(model_id)
 
     if model is not None:
         import torch
