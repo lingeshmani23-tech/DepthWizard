@@ -1,6 +1,6 @@
 """
 DEPTHWIZARD — Single-View Height Estimation & 3D Flythrough
-Smart India Hackathon (SIH) Prototype Application
+Lightweight Public Frontend (Streamlit)
 Entry Point: streamlit run app.py
 """
 
@@ -15,7 +15,6 @@ from PIL import Image
 import cv2
 import streamlit as st
 import streamlit.components.v1 as components
-import torch
 
 # Add project root to sys.path
 BASE_DIR = Path(__file__).resolve().parent
@@ -24,12 +23,19 @@ if str(BASE_DIR) not in sys.path:
 
 import config
 from src.image_utils import load_image, validate_image, resize_depth_to_image
-from src.depth_engine import estimate_depth, convert_to_distance_like_depth, save_depth, visualize_depth, get_device_status
-from src.calibration import calibrate_scene, CalibrationResult
-from src.height_estimator import estimate_height, HeightResult
-from src.evaluation import evaluate_height, EvaluationResult
-from src.pointcloud import create_point_cloud, save_point_cloud_ply
-from src.flythrough import generate_flythrough
+from src.api.client import check_backend_health, analyze_image_remote, get_backend_url
+
+# Fallback local computational modules if backend is running locally in single-process mode
+try:
+    from src.depth_engine import estimate_depth, convert_to_distance_like_depth, save_depth, visualize_depth, get_device_status
+    from src.calibration import calibrate_scene
+    from src.height_estimator import estimate_height
+    from src.evaluation import evaluate_height
+    from src.pointcloud import create_point_cloud, save_point_cloud_ply
+    from src.flythrough import generate_flythrough
+    LOCAL_PIPELINE_AVAILABLE = True
+except Exception:
+    LOCAL_PIPELINE_AVAILABLE = False
 
 # ----------------------------------------------------
 # Page Configuration
@@ -156,6 +162,10 @@ if "session_id" not in st.session_state:
 session_dir = config.OUTPUT_DIR / f"session_{st.session_state.session_id}"
 session_dir.mkdir(parents=True, exist_ok=True)
 
+# Check Backend API Health
+backend_url = get_backend_url()
+backend_online, backend_info = check_backend_health(backend_url)
+
 # ----------------------------------------------------
 # HEADER
 # ----------------------------------------------------
@@ -167,11 +177,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ----------------------------------------------------
-# SIDEBAR (Minimal Settings)
+# SIDEBAR (Minimal Settings & Health Indicator)
 # ----------------------------------------------------
 st.sidebar.title("DepthWizard Controls")
-dev_status = get_device_status()
-st.sidebar.markdown(f"**Device:** `{dev_status['status_label']}`")
+if backend_online:
+    st.sidebar.markdown("• **System Status:** `System Ready ✓` 🟢")
+    st.sidebar.markdown(f"• **AI Backend:** `{backend_url}`")
+    st.sidebar.markdown(f"• **Device:** `{backend_info.get('device_label', 'CPU')}`")
+elif LOCAL_PIPELINE_AVAILABLE:
+    dev_status = get_device_status()
+    st.sidebar.markdown("• **System Status:** `Local Pipeline Active` 🟢")
+    st.sidebar.markdown(f"• **Device:** `{dev_status['status_label']}`")
+else:
+    st.sidebar.markdown("• **System Status:** `Backend Offline` 🔴")
+
 st.sidebar.markdown("**Depth Model:** `Depth Anything V2`")
 st.sidebar.markdown("---")
 
@@ -224,6 +243,10 @@ with col_img_meta:
 
 st.markdown("---")
 
+# Read image bytes for API upload
+with open(input_image_path, "rb") as f:
+    img_bytes = f.read()
+
 # ----------------------------------------------------
 # 02 — DEPTH ESTIMATION
 # ----------------------------------------------------
@@ -231,23 +254,40 @@ st.markdown('<div class="section-header">02 — DEPTH ESTIMATION</div>', unsafe_
 
 gen_depth_btn = st.button("Generate Depth", type="primary", use_container_width=True)
 
-# Auto-compute or update depth map
 if gen_depth_btn or "dist_depth" not in st.session_state:
-    with st.spinner("Processing Depth Anything V2..."):
-        raw_depth = estimate_depth(np_img)
-        resized_raw_depth = resize_depth_to_image(raw_depth, (img_h, img_w))
-        dist_depth = convert_to_distance_like_depth(resized_raw_depth)
-        
-        depth_npy_path = session_dir / "depth.npy"
-        np.save(depth_npy_path, dist_depth)
-        npy_p, png_p = save_depth(dist_depth, str(session_dir))
-        
-        st.session_state.dist_depth = dist_depth
-        st.session_state.depth_png_path = png_p
+    if backend_online:
+        with st.spinner("Executing Depth Anything V2 via AI Backend..."):
+            success, api_res = analyze_image_remote(
+                image_bytes=img_bytes,
+                filename="input_image.jpg",
+                fov_deg=fov_setting,
+                voxel_size=voxel_setting,
+                backend_url=backend_url
+            )
+            if success:
+                st.session_state.api_res = api_res
+                st.session_state.dist_depth_stats = api_res.get("depth_stats", {})
+            else:
+                st.error(f"Backend processing error: {api_res.get('error')}")
+                st.stop()
+    elif LOCAL_PIPELINE_AVAILABLE:
+        with st.spinner("Processing Depth Anything V2 (Local Fallback)..."):
+            raw_depth = estimate_depth(np_img)
+            resized_raw_depth = resize_depth_to_image(raw_depth, (img_h, img_w))
+            dist_depth = convert_to_distance_like_depth(resized_raw_depth)
+            
+            depth_npy_path = session_dir / "depth.npy"
+            np.save(depth_npy_path, dist_depth)
+            npy_p, png_p = save_depth(dist_depth, str(session_dir))
+            
+            st.session_state.dist_depth = dist_depth
+            st.session_state.depth_png_path = png_p
+            st.session_state.dist_depth_stats = visualize_depth(dist_depth)
+    else:
+        st.error("AI Processing Backend is currently offline. Please launch the backend service.")
+        st.stop()
 
-dist_depth = st.session_state.dist_depth
-depth_png_path = st.session_state.depth_png_path
-depth_stats = visualize_depth(dist_depth)
+depth_stats = st.session_state.get("dist_depth_stats", {"min": 0.0, "max": 1.0, "mean": 0.5})
 
 st.caption("RELATIVE DEPTH — Depth Anything V2")
 
@@ -255,13 +295,16 @@ col_d1, col_d2 = st.columns(2)
 with col_d1:
     st.image(pil_img, caption="Original RGB Image", use_container_width=True)
 with col_d2:
-    if os.path.exists(depth_png_path):
-        st.image(Image.open(depth_png_path), caption="Relative Depth Map", use_container_width=True)
+    if "api_res" in st.session_state and backend_online:
+        depth_url = f"{backend_url}{st.session_state.api_res['media_urls']['depth_png']}"
+        st.image(depth_url, caption="Relative Depth Map", use_container_width=True)
+    elif "depth_png_path" in st.session_state and os.path.exists(st.session_state.depth_png_path):
+        st.image(Image.open(st.session_state.depth_png_path), caption="Relative Depth Map", use_container_width=True)
 
 cm1, cm2, cm3 = st.columns(3)
-cm1.markdown(f'<div class="metric-card"><div class="metric-value">{depth_stats["min"]:.2f}</div><div class="metric-label">Depth Minimum</div></div>', unsafe_allow_html=True)
-cm2.markdown(f'<div class="metric-card"><div class="metric-value">{depth_stats["max"]:.2f}</div><div class="metric-label">Depth Maximum</div></div>', unsafe_allow_html=True)
-cm3.markdown(f'<div class="metric-card"><div class="metric-value">{depth_stats["mean"]:.2f}</div><div class="metric-label">Depth Mean</div></div>', unsafe_allow_html=True)
+cm1.markdown(f'<div class="metric-card"><div class="metric-value">{depth_stats.get("min", 0.0):.2f}</div><div class="metric-label">Depth Minimum</div></div>', unsafe_allow_html=True)
+cm2.markdown(f'<div class="metric-card"><div class="metric-value">{depth_stats.get("max", 0.0):.2f}</div><div class="metric-label">Depth Maximum</div></div>', unsafe_allow_html=True)
+cm3.markdown(f'<div class="metric-card"><div class="metric-value">{depth_stats.get("mean", 0.0):.2f}</div><div class="metric-label">Depth Mean</div></div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -300,19 +343,25 @@ with col_cal1:
 ref_top_pt = (ref_x, ref_top_y)
 ref_bot_pt = (ref_x, ref_bot_y)
 
-calibration = calibrate_scene(
-    depth_map=dist_depth,
-    reference_top=ref_top_pt,
-    reference_bottom=ref_bot_pt,
-    reference_height_m=ref_height_input,
-    fov_deg=fov_setting
-)
+if backend_online and "api_res" in st.session_state:
+    calib_dict = st.session_state.api_res.get("calibration", {})
+elif LOCAL_PIPELINE_AVAILABLE and "dist_depth" in st.session_state:
+    calib_obj = calibrate_scene(
+        depth_map=st.session_state.dist_depth,
+        reference_top=ref_top_pt,
+        reference_bottom=ref_bot_pt,
+        reference_height_m=ref_height_input,
+        fov_deg=fov_setting
+    )
+    calib_dict = calib_obj.to_dict()
+else:
+    calib_dict = {"reference_pixel_height": 0.0, "reference_depth": 0.0, "scale_factor": 1.0}
 
 with col_cal2:
     st.markdown("**Calibration Results**")
-    st.write(f"• **Reference Pixel Height:** `{calibration.reference_pixel_height:.1f} px`")
-    st.write(f"• **Reference Relative Depth:** `{calibration.reference_depth:.4f}`")
-    st.write(f"• **Scale Factor ($S_{{calib}}$):** `{calibration.scale_factor:.6f}`")
+    st.write(f"• **Reference Pixel Height:** `{calib_dict.get('reference_pixel_height', 0.0):.1f} px`")
+    st.write(f"• **Reference Relative Depth:** `{calib_dict.get('reference_depth', 0.0):.4f}`")
+    st.write(f"• **Scale Factor ($S_{{calib}}$):** `{calib_dict.get('scale_factor', 1.0):.6f}`")
     st.write(f"• **Calibration Status:** `Calibrated ✓`")
 
 st.markdown("---")
@@ -337,21 +386,29 @@ with col_tgt1:
 tgt_top_pt = (tgt_x, tgt_top_y)
 tgt_bot_pt = (tgt_x, tgt_bot_y)
 
-height_res = estimate_height(
-    depth_map=dist_depth,
-    target_top=tgt_top_pt,
-    target_bottom=tgt_bot_pt,
-    calibration=calibration
-)
+if backend_online and "api_res" in st.session_state:
+    height_dict = st.session_state.api_res.get("height_result", {})
+elif LOCAL_PIPELINE_AVAILABLE and "dist_depth" in st.session_state:
+    height_obj = estimate_height(
+        depth_map=st.session_state.dist_depth,
+        target_top=tgt_top_pt,
+        target_bottom=tgt_bot_pt,
+        calibration=calib_obj
+    )
+    height_dict = height_obj.to_dict()
+else:
+    height_dict = {"target_pixel_height": 0.0, "target_depth": 0.0, "estimated_height_m": 0.0}
+
+est_height_val = height_dict.get("estimated_height_m", 0.0)
 
 with col_tgt2:
-    st.write(f"• **Target Pixel Height:** `{height_res.target_pixel_height:.1f} px`")
-    st.write(f"• **Target Relative Depth:** `{height_res.target_depth:.4f}`")
+    st.write(f"• **Target Pixel Height:** `{height_dict.get('target_pixel_height', 0.0):.1f} px`")
+    st.write(f"• **Target Relative Depth:** `{height_dict.get('target_depth', 0.0):.4f}`")
     
     st.markdown(f"""
     <div class="result-prominent">
         <div class="result-label">Approximate Estimated Height</div>
-        <div class="result-value">{height_res.estimated_height_m:.2f} m</div>
+        <div class="result-value">{est_height_val:.2f} m</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -368,7 +425,7 @@ cv2.putText(overlay_img, f"REF: {ref_height_input:.2f}m", (ref_x + 8, ref_top_y 
 cv2.line(overlay_img, (tgt_x, tgt_top_y), (tgt_x, tgt_bot_y), (255, 255, 0), 3)
 cv2.circle(overlay_img, (tgt_x, tgt_top_y), 6, (255, 255, 0), -1)
 cv2.circle(overlay_img, (tgt_x, tgt_bot_y), 6, (255, 255, 0), -1)
-cv2.putText(overlay_img, f"TARGET: {height_res.estimated_height_m:.2f}m", (tgt_x + 8, tgt_top_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+cv2.putText(overlay_img, f"TARGET: {est_height_val:.2f}m", (tgt_x + 8, tgt_top_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
 overlay_rgb = cv2.cvtColor(overlay_img, cv2.COLOR_BGR2RGB)
 st.image(overlay_rgb, caption="Calibrated Keypoints Overlay (Green = Reference Object, Cyan = Target Object)", use_container_width=True)
@@ -383,18 +440,24 @@ st.markdown('<div class="section-header">05 — EVALUATION</div>', unsafe_allow_
 known_tgt_input = st.number_input("Known Target Height (optional ground-truth in meters)", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
 
 if known_tgt_input > 0.0:
-    eval_res = evaluate_height(
-        image_name="uploaded_image",
-        estimated_height_m=height_res.estimated_height_m,
-        known_height_m=known_tgt_input,
-        reference_height_m=ref_height_input
-    )
+    if LOCAL_PIPELINE_AVAILABLE:
+        eval_res = evaluate_height(
+            image_name="uploaded_image",
+            estimated_height_m=est_height_val,
+            known_height_m=known_tgt_input,
+            reference_height_m=ref_height_input
+        )
+        abs_err = eval_res.absolute_error_m
+        pct_err = eval_res.percentage_error
+    else:
+        abs_err = abs(est_height_val - known_tgt_input)
+        pct_err = (abs_err / known_tgt_input) * 100.0
 
     ev1, ev2, ev3, ev4 = st.columns(4)
-    ev1.markdown(f'<div class="metric-card"><div class="metric-value">{height_res.estimated_height_m:.2f} m</div><div class="metric-label">Estimated Height</div></div>', unsafe_allow_html=True)
+    ev1.markdown(f'<div class="metric-card"><div class="metric-value">{est_height_val:.2f} m</div><div class="metric-label">Estimated Height</div></div>', unsafe_allow_html=True)
     ev2.markdown(f'<div class="metric-card"><div class="metric-value">{known_tgt_input:.2f} m</div><div class="metric-label">Known Height</div></div>', unsafe_allow_html=True)
-    ev3.markdown(f'<div class="metric-card"><div class="metric-value">{eval_res.absolute_error_m:.2f} m</div><div class="metric-label">Absolute Error</div></div>', unsafe_allow_html=True)
-    ev4.markdown(f'<div class="metric-card"><div class="metric-value">{eval_res.percentage_error:.2f} %</div><div class="metric-label">Percentage Error</div></div>', unsafe_allow_html=True)
+    ev3.markdown(f'<div class="metric-card"><div class="metric-value">{abs_err:.2f} m</div><div class="metric-label">Absolute Error</div></div>', unsafe_allow_html=True)
+    ev4.markdown(f'<div class="metric-card"><div class="metric-value">{pct_err:.2f} %</div><div class="metric-label">Percentage Error</div></div>', unsafe_allow_html=True)
 else:
     st.info("Ground-truth height not provided.")
 
@@ -405,36 +468,41 @@ st.markdown("---")
 # ----------------------------------------------------
 st.markdown('<div class="section-header">06 — 3D RECONSTRUCTION</div>', unsafe_allow_html=True)
 
-metric_depth = dist_depth * calibration.scale_factor
-ply_path = session_dir / "scene.ply"
+if backend_online and "api_res" in st.session_state:
+    pc_data = st.session_state.api_res.get("pointcloud", {})
+    pts_sample = pc_data.get("sample_points", [])
+    cols_sample = pc_data.get("sample_colors", [])
+    num_pts = pc_data.get("num_points", len(pts_sample))
+    ply_download_url = f"{backend_url}{st.session_state.api_res['media_urls']['ply_file']}"
+elif LOCAL_PIPELINE_AVAILABLE and "dist_depth" in st.session_state:
+    metric_depth = st.session_state.dist_depth * calib_obj.scale_factor
+    ply_path = session_dir / "scene.ply"
 
-points_3d, colors_3d, pc_stats = create_point_cloud(
-    rgb_img=np_img,
-    depth_map=metric_depth,
-    intrinsics=calibration.camera_intrinsics,
-    voxel_size=voxel_setting
-)
-save_point_cloud_ply(points_3d, colors_3d, str(ply_path))
+    points_3d, colors_3d, pc_stats = create_point_cloud(
+        rgb_img=np_img,
+        depth_map=metric_depth,
+        intrinsics=calib_obj.camera_intrinsics,
+        voxel_size=voxel_setting
+    )
+    save_point_cloud_ply(points_3d, colors_3d, str(ply_path))
+    num_pts = len(points_3d)
+    pts_sample = points_3d.tolist()
+    cols_sample = colors_3d.tolist()
+    ply_download_url = None
+else:
+    num_pts = 0
+    pts_sample, cols_sample = [], []
+    ply_download_url = None
 
-st.write(f"• **Point Count:** `{len(points_3d):,}` 3D metric vertices")
+st.write(f"• **Point Count:** `{num_pts:,}` 3D metric vertices")
 
 # Interactive Three.js WebGL Point Cloud Component
-def render_threejs_pointcloud(points, colors):
-    if len(points) == 0:
+def render_threejs_pointcloud(positions, colors):
+    if len(positions) == 0:
         return "<p style='color:white;'>Empty Point Cloud</p>"
     
-    # Subsample for smooth 60fps rendering in WebGL
-    max_pts = 12000
-    if len(points) > max_pts:
-        idx = np.random.choice(len(points), max_pts, replace=False)
-        pts = points[idx]
-        cols = colors[idx]
-    else:
-        pts = points
-        cols = colors
-
-    pts_js = json.dumps(pts.tolist())
-    cols_js = json.dumps(cols.tolist())
+    pts_js = json.dumps(positions)
+    cols_js = json.dumps(colors)
 
     html_code = f"""
     <!DOCTYPE html>
@@ -504,9 +572,11 @@ def render_threejs_pointcloud(points, colors):
     """
     return html_code
 
-components.html(render_threejs_pointcloud(points_3d, colors_3d), height=470)
+components.html(render_threejs_pointcloud(pts_sample, cols_sample), height=470)
 
-if ply_path.exists():
+if ply_download_url:
+    st.markdown(f"[💾 Download PLY Point Cloud]({ply_download_url})")
+elif 'ply_path' in locals() and ply_path.exists():
     with open(ply_path, "rb") as f:
         st.download_button(
             label="Download PLY Point Cloud",
@@ -522,28 +592,32 @@ st.markdown("---")
 # ----------------------------------------------------
 st.markdown('<div class="section-header">07 — VIRTUAL FLYTHROUGH</div>', unsafe_allow_html=True)
 
-mp4_path = session_dir / "flythrough.mp4"
+if backend_online and "api_res" in st.session_state:
+    mp4_url = f"{backend_url}{st.session_state.api_res['media_urls']['flythrough_mp4']}"
+    st.video(mp4_url)
+    st.markdown(f"[💾 Download Flythrough MP4]({mp4_url})")
+elif LOCAL_PIPELINE_AVAILABLE and "dist_depth" in st.session_state:
+    mp4_path = session_dir / "flythrough.mp4"
+    if 'points_3d' in locals() and len(points_3d) > 0:
+        if not mp4_path.exists():
+            with st.spinner("Rendering 3D camera flythrough MP4 video..."):
+                generate_flythrough(
+                    points=points_3d,
+                    colors=colors_3d,
+                    output_path=str(mp4_path),
+                    duration_sec=config.FLYTHROUGH_DURATION,
+                    fps=config.FLYTHROUGH_FPS
+                )
 
-if len(points_3d) > 0:
-    if not mp4_path.exists():
-        with st.spinner("Rendering 3D camera flythrough MP4 video..."):
-            generate_flythrough(
-                points=points_3d,
-                colors=colors_3d,
-                output_path=str(mp4_path),
-                duration_sec=config.FLYTHROUGH_DURATION,
-                fps=config.FLYTHROUGH_FPS
-            )
-
-    if mp4_path.exists():
-        st.video(str(mp4_path))
-        with open(mp4_path, "rb") as vf:
-            st.download_button(
-                label="Download Flythrough MP4",
-                data=vf.read(),
-                file_name=f"depthwizard_flythrough_{st.session_state.session_id}.mp4",
-                mime="video/mp4"
-            )
+        if mp4_path.exists():
+            st.video(str(mp4_path))
+            with open(mp4_path, "rb") as vf:
+                st.download_button(
+                    label="Download Flythrough MP4",
+                    data=vf.read(),
+                    file_name=f"depthwizard_flythrough_{st.session_state.session_id}.mp4",
+                    mime="video/mp4"
+                )
 
 st.markdown("---")
 
@@ -555,8 +629,8 @@ st.markdown('<div class="section-header">08 — FINAL RESULT</div>', unsafe_allo
 st.markdown(f"""
 <div class="summary-box">
     <h3>Final Reconstruction & Estimation Summary</h3>
-    <p>• <strong>Estimated Height:</strong> <span style="color:#34D399; font-weight:700; font-size:1.2rem;">{height_res.estimated_height_m:.2f} m</span></p>
-    <p>• <strong>3D Reconstruction:</strong> Generated ✓ ({len(points_3d):,} vertices)</p>
+    <p>• <strong>Estimated Height:</strong> <span style="color:#34D399; font-weight:700; font-size:1.2rem;">{est_height_val:.2f} m</span></p>
+    <p>• <strong>3D Reconstruction:</strong> Generated ✓ ({num_pts:,} vertices)</p>
     <p>• <strong>Virtual Flythrough:</strong> Generated ✓ (MP4 Video output)</p>
 </div>
 """, unsafe_allow_html=True)

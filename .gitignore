@@ -1,7 +1,10 @@
-# Environments
+# Environments & Credentials
 venv/
 ENV/
 env/
+.env
+.env.*
+*.env
 
 # Python Cache
 __pycache__/
@@ -27,3 +30,8 @@ output/
 outputs/
 scratch/
 .vercel/
+
+# Media and Point Cloud Generated Outputs
+*.npy
+*.mp4
+*.ply

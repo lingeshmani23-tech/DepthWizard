@@ -1,0 +1,19 @@
+# DepthWizard AI Computation Backend Dependencies
+fastapi>=0.109.0
+uvicorn>=0.27.0
+python-multipart>=0.0.6
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.38.0
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+pillow>=10.0.0
+matplotlib>=3.7.0
+pandas>=2.0.0
+scipy>=1.10.0
+open3d>=0.17.0
+trimesh>=4.0.0
+huggingface-hub>=0.20.0
+imageio>=2.30.0
+imageio-ffmpeg>=0.4.8
+requests>=2.31.0
