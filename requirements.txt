@@ -1,7 +1,4 @@
-# DEPTHWIZARD Lightweight Public Frontend Dependencies
+# DEPTHWIZARD Vercel Lightweight Serverless Dependencies
 # Heavy PyTorch/CUDA/Open3D AI dependencies reside exclusively in backend/requirements.txt
-streamlit>=1.30.0
+# Streamlit dependencies reside in app/requirements.txt
 requests>=2.31.0
-pillow>=10.0.0
-numpy>=1.24.0
-opencv-python-headless>=4.8.0
