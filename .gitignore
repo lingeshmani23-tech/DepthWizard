@@ -21,7 +21,9 @@ models/*.onnx
 *.log
 .DS_Store
 
-# Temporary outputs (optional caches)
+# Temporary outputs & session caches
+cache/
+output/
+outputs/
 scratch/
 .vercel/
-
