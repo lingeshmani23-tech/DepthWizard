@@ -251,6 +251,11 @@ async def analyze_image(
         y_norm = (y_vals - np.min(y_vals)) / (np.ptp(y_vals) + 1e-6)
         height_cols = cm.get_cmap("turbo")(y_norm)[:, :3].tolist()
 
+        # Compute file sizes in MB
+        ply_size_mb = round(ply_path.stat().st_size / (1024 * 1024), 2) if ply_path.exists() else 0.0
+        mesh_size_mb = round(mesh_ply_path.stat().st_size / (1024 * 1024), 2) if mesh_ply_path.exists() else 0.0
+        mp4_size_mb = round(mp4_path.stat().st_size / (1024 * 1024), 2) if mp4_path.exists() else 0.0
+
         # Base URL for static assets
         base_url = "/api/media"
 
@@ -272,6 +277,18 @@ async def analyze_image(
                 "sample_height_colors": height_cols,
                 "stats": pc_stats
             },
+            "file_sizes": {
+                "ply_mb": ply_size_mb,
+                "mesh_mb": mesh_size_mb,
+                "mp4_mb": mp4_size_mb
+            },
+            "video_metadata": {
+                "duration_sec": config.FLYTHROUGH_DURATION,
+                "fps": config.FLYTHROUGH_FPS,
+                "frames": config.FLYTHROUGH_DURATION * config.FLYTHROUGH_FPS,
+                "resolution": "1280x720",
+                "codec": "H.264 MP4"
+            },
             "media_urls": {
                 "depth_png": f"{base_url}/{session_id}/depth_visualization.png",
                 "ply_file": f"{base_url}/{session_id}/scene.ply",
@@ -288,7 +305,7 @@ async def analyze_image(
 @app.get("/api/media/{session_id}/{filename}")
 def get_media_file(session_id: str, filename: str):
     """
-    Serve generated static media assets (depth image, PLY cloud, mesh PLY, MP4 video).
+    Serve generated static media assets (depth image, PLY cloud, mesh PLY, MP4 video) with attachment disposition.
     """
     file_path = config.OUTPUT_DIR / f"session_{session_id}" / filename
     if not file_path.exists():
@@ -303,4 +320,8 @@ def get_media_file(session_id: str, filename: str):
     else:
         mime = "application/octet-stream"
 
-    return FileResponse(str(file_path), media_type=mime)
+    return FileResponse(
+        str(file_path),
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )

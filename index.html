@@ -467,8 +467,36 @@
     <!-- 07 — VIRTUAL 3D FLYTHROUGH -->
     <div class="section-header">07 — VIRTUAL 3D FLYTHROUGH</div>
     <div class="card">
-        <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">Camera traversal through the reconstructed 3D scene (RGB rendered MP4 video)</p>
-        <video id="flythrough-video" controls autoplay loop style="width: 100%; border-radius: 10px;"></video>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">Camera traversal through the reconstructed 3D scene (RGB rendered MP4 video)</p>
+            <span class="status-badge" id="video-status-badge">Flythrough Ready ✓</span>
+        </div>
+
+        <div style="position: relative; background-color: #05070D; border-radius: 10px; overflow: hidden;">
+            <video id="flythrough-video" controls autoplay loop style="width: 100%; border-radius: 10px; display: block;"></video>
+            <div id="video-error-msg" style="display: none; padding: 2rem; text-align: center; color: #F87171;">
+                Flythrough preview could not be loaded. Please ensure the AI backend is active.
+            </div>
+        </div>
+
+        <div class="grid-4" style="margin-top: 1rem;">
+            <div class="metric-card">
+                <div class="metric-value" id="vid-dur">6.0 s</div>
+                <div class="metric-label">Duration</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="vid-fps">30 FPS</div>
+                <div class="metric-label">Frame Rate</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="vid-res">1280 x 720</div>
+                <div class="metric-label">Resolution</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="vid-codec">H.264 MP4</div>
+                <div class="metric-label">Video Codec</div>
+            </div>
+        </div>
     </div>
 
     <hr>
@@ -476,10 +504,19 @@
     <!-- 08 — FINAL RESULT & EXPORTS -->
     <div class="section-header">08 — FINAL RESULT & EXPORTS</div>
     <div class="card">
+        <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem;">
+            <p style="font-size: 1.1rem; font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.8rem;">Final Pipeline Summary</p>
+            <div class="grid-3">
+                <p>• <strong>Point Cloud:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-ply-ready">Ready ✓</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-ply">(1.85 MB)</span></p>
+                <p>• <strong>3D Mesh:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-mesh-ready">Ready ✓</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-mesh">(2.40 MB)</span></p>
+                <p>• <strong>Flythrough Video:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-mp4-ready">Ready ✓</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-mp4">(4.12 MB)</span></p>
+            </div>
+        </div>
+
         <div class="grid-3">
-            <a href="#" class="btn btn-outline" id="dl-ply">💾 Download Point Cloud (PLY)</a>
-            <a href="#" class="btn btn-outline" id="dl-mesh">💾 Download 3D Mesh (PLY)</a>
-            <a href="#" class="btn" id="dl-mp4">💾 Download Flythrough (MP4)</a>
+            <a href="#" class="btn btn-outline" id="dl-ply" download="depthwizard_scene.ply">💾 Download Point Cloud (PLY)</a>
+            <a href="#" class="btn btn-outline" id="dl-mesh" download="depthwizard_mesh.ply">💾 Download 3D Mesh (PLY)</a>
+            <a href="#" class="btn" id="dl-mp4" download="depthwizard_flythrough.mp4">💾 Download Flythrough (MP4)</a>
         </div>
     </div>
 
@@ -716,6 +753,9 @@
             btn.disabled = true;
             btn.innerText = "Processing Depth Anything V2 & 3D Reconstruction...";
 
+            const badge = document.getElementById("video-status-badge");
+            badge.innerText = "Generating 3D Flythrough...";
+
             const formData = new FormData();
             const fileInput = document.getElementById("file-input");
 
@@ -750,14 +790,46 @@
 
                     const mediaBase = backendUrl;
                     document.getElementById("depth-img-display").src = mediaBase + data.media_urls.depth_png;
-                    document.getElementById("flythrough-video").src = mediaBase + data.media_urls.flythrough_mp4;
 
-                    document.getElementById("dl-ply").href = mediaBase + data.media_urls.ply_file;
-                    document.getElementById("dl-mesh").href = mediaBase + data.media_urls.mesh_file;
-                    document.getElementById("dl-mp4").href = mediaBase + data.media_urls.flythrough_mp4;
+                    // Section 07 Video Player Update & Load Execution
+                    const videoElem = document.getElementById("flythrough-video");
+                    const errorElem = document.getElementById("video-error-msg");
+                    
+                    const mp4FullUrl = mediaBase + data.media_urls.flythrough_mp4;
+                    videoElem.src = mp4FullUrl;
+                    videoElem.style.display = "block";
+                    errorElem.style.display = "none";
+
+                    videoElem.load();
+                    videoElem.play().catch(e => console.log("Autoplay notice: ", e));
+
+                    badge.innerText = "Flythrough Ready ✓";
+
+                    if (data.video_metadata) {
+                        document.getElementById("vid-dur").innerText = data.video_metadata.duration_sec + " s";
+                        document.getElementById("vid-fps").innerText = data.video_metadata.fps + " FPS";
+                        document.getElementById("vid-res").innerText = data.video_metadata.resolution;
+                        document.getElementById("vid-codec").innerText = data.video_metadata.codec;
+                    }
+
+                    // Section 08 Download Links & File Size Indicators
+                    const plyUrl = mediaBase + data.media_urls.ply_file;
+                    const meshUrl = mediaBase + data.media_urls.mesh_file;
+
+                    document.getElementById("dl-ply").href = plyUrl;
+                    document.getElementById("dl-mesh").href = meshUrl;
+                    document.getElementById("dl-mp4").href = mp4FullUrl;
+
+                    if (data.file_sizes) {
+                        document.getElementById("sz-ply").innerText = "(" + data.file_sizes.ply_mb + " MB)";
+                        document.getElementById("sz-mesh").innerText = "(" + data.file_sizes.mesh_mb + " MB)";
+                        document.getElementById("sz-mp4").innerText = "(" + data.file_sizes.mp4_mb + " MB)";
+                    }
                 }
             } catch (e) {
                 console.log("Analysis error: ", e);
+                badge.innerText = "Processing Error";
+                document.getElementById("video-error-msg").style.display = "block";
             } finally {
                 isProcessing = false;
                 btn.disabled = false;
