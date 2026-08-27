@@ -582,3 +582,17 @@ st.write("- Reference-assisted calibration determines approximate scale.")
 st.write("- Perspective and occlusion can affect height estimation.")
 st.write("- Single-view 3D reconstruction is incomplete.")
 st.write("- Results are approximate rather than survey-grade measurements.")
+
+# ----------------------------------------------------
+# VERCEL & SERVERLESS EXPORT COMPATIBILITY
+# Export top-level app, application, and handler symbols for platform inspection.
+# ----------------------------------------------------
+def handler(request=None, response=None):
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "text/html"},
+        "body": "<h1>DEPTHWIZARD Application</h1><p>Run via Streamlit: <code>streamlit run app.py</code></p>"
+    }
+
+app = handler
+application = handler
