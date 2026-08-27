@@ -1,24 +1,13 @@
 {
-  "version": 2,
   "cleanUrls": true,
-  "builds": [
+  "rewrites": [
     {
-      "src": "api/*.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/health",
-      "dest": "api/health.py"
+      "source": "/api/health",
+      "destination": "/api/health.py"
     },
     {
-      "src": "/api/analyze",
-      "dest": "api/analyze.py"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/api/analyze",
+      "destination": "/api/analyze.py"
     }
   ]
 }
