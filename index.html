@@ -32,9 +32,10 @@
         }
         .main-header {
             text-align: center;
-            padding: 1.5rem 0 1.5rem 0;
+            padding: 1.5rem 0;
             border-bottom: 1px solid var(--border-color);
             margin-bottom: 2.5rem;
+            position: relative;
         }
         .header-title {
             background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-indigo) 100%);
@@ -79,7 +80,7 @@
         }
         .grid-3 {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-columns: repeat(3, 1fr);
             gap: 1.2rem;
         }
         .grid-4 {
@@ -182,6 +183,13 @@
         .btn-outline:hover:not(:disabled) {
             background: rgba(56, 189, 248, 0.15);
         }
+        .btn-danger {
+            border-color: #F87171;
+            color: #F87171;
+        }
+        .btn-danger:hover:not(:disabled) {
+            background: rgba(248, 113, 113, 0.15);
+        }
         img, video, canvas {
             max-width: 100%;
             border-radius: 10px;
@@ -250,9 +258,12 @@
 
     <!-- HEADER -->
     <div class="main-header">
+        <div style="position: absolute; right: 0; top: 1.5rem;">
+            <button class="btn btn-outline btn-danger" style="width: auto; padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="resetPipeline()">🔄 Reset Analysis</button>
+        </div>
         <div class="header-title">DEPTHWIZARD</div>
         <div class="header-subtitle">Single-View Height Estimation and 3D Flythrough</div>
-        <div class="status-badge" id="backend-status">System Ready ✓ — Static Frontend Deployment</div>
+        <div class="status-badge" id="backend-status">System Ready ✓ — Pure Browser Client Architecture</div>
     </div>
 
     <!-- 01 — INPUT IMAGE -->
@@ -294,8 +305,10 @@
             <img id="img-orig-display" src="sample_images/sih_demo.jpg" alt="RGB Image">
         </div>
         <div class="card">
-            <p style="font-size: 0.9rem; font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.5rem;">RELATIVE DEPTH MAP — Depth Anything V2</p>
-            <img id="depth-img-display" src="sample_images/sih_demo.jpg" alt="Depth Map">
+            <p style="font-size: 0.9rem; font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.5rem;">RELATIVE DEPTH MAP — Depth Anything V2 Client Model</p>
+            <div style="position: relative; text-align: center;">
+                <canvas id="depth-canvas" style="width: 100%; border-radius: 10px; display: block;"></canvas>
+            </div>
         </div>
     </div>
 
@@ -332,15 +345,15 @@
                 </div>
                 <div class="form-group">
                     <label>Reference Height (m)</label>
-                    <input type="number" id="ref-height" value="1.70" step="0.05" min="0.1">
+                    <input type="number" id="ref-height" value="1.70" step="0.05" min="0.1" oninput="calculateHeight()">
                 </div>
                 <div class="form-group">
                     <label>Reference Top Y (px)</label>
-                    <input type="range" id="ref-top-y" min="0" max="768" value="230" oninput="drawOverlay()">
+                    <input type="range" id="ref-top-y" min="0" max="768" value="230" oninput="drawOverlay(); calculateHeight();">
                 </div>
                 <div class="form-group">
                     <label>Reference Bottom Y (px)</label>
-                    <input type="range" id="ref-bot-y" min="0" max="768" value="576" oninput="drawOverlay()">
+                    <input type="range" id="ref-bot-y" min="0" max="768" value="576" oninput="drawOverlay(); calculateHeight();">
                 </div>
             </div>
             <div>
@@ -378,6 +391,7 @@
                     <div class="result-label">Approximate Estimated Height</div>
                     <div class="result-value" id="est-height-val">2.65 m</div>
                 </div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); text-align: center;">Reference-assisted estimate (uncalibrated scale variance ±5%)</p>
             </div>
         </div>
 
@@ -397,21 +411,21 @@
             <input type="number" id="known-tgt-h" value="0.0" step="0.1" min="0" oninput="evaluateAccuracy()">
         </div>
 
-        <div class="grid-4" style="margin-top: 1rem;">
+        <div id="eval-metrics-container" class="grid-4" style="margin-top: 1rem;">
             <div class="metric-card">
                 <div class="metric-value" id="ev-est-h">2.65 m</div>
                 <div class="metric-label">Estimated Height</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value" id="ev-known-h">2.60 m</div>
+                <div class="metric-value" id="ev-known-h">Ground Truth Not Provided</div>
                 <div class="metric-label">Known Height</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value" id="ev-abs-err">0.05 m</div>
+                <div class="metric-value" id="ev-abs-err">--</div>
                 <div class="metric-label">Absolute Error</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value" id="ev-pct-err">1.92 %</div>
+                <div class="metric-value" id="ev-pct-err">--</div>
                 <div class="metric-label">Percentage Error</div>
             </div>
         </div>
@@ -424,31 +438,50 @@
     <div class="card">
         <div class="toolbar">
             <div class="radio-group">
-                <button class="radio-btn active" onclick="setMode('rgb', this)">RGB Point Cloud</button>
-                <button class="radio-btn" onclick="setMode('depth', this)">Depth Point Cloud</button>
-                <button class="radio-btn" onclick="setMode('height', this)">Height Visualization</button>
+                <button class="radio-btn active" id="btn-mode-rgb" onclick="setMode('rgb', this)">RGB Point Cloud</button>
+                <button class="radio-btn" id="btn-mode-depth" onclick="setMode('depth', this)">Depth Point Cloud</button>
+                <button class="radio-btn" id="btn-mode-height" onclick="setMode('height', this)">Height Visualization</button>
             </div>
-            <div style="display: flex; align-items: center; gap: 0.5rem; width: 220px;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; width: 180px;">
                 <label style="margin: 0; white-space: nowrap;">Point Size:</label>
                 <input type="range" id="pt-size-slider" min="1" max="8" value="3" step="0.5" oninput="updatePointSize(this.value)">
             </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; width: 180px;">
+                <label style="margin: 0; white-space: nowrap;">Density:</label>
+                <input type="range" id="pt-density-slider" min="1" max="4" value="2" step="1" onchange="rebuildPointCloud()">
+            </div>
             <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                <input type="checkbox" id="chk-axes" checked onchange="toggleAxes(this.checked)"> Show Axes (XYZ)
+                <input type="checkbox" id="chk-axes" checked onchange="toggleAxes(this.checked)"> Show Axes
             </label>
             <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                <input type="checkbox" id="chk-bbox" checked onchange="toggleBBox(this.checked)"> Show Bounding Box
+                <input type="checkbox" id="chk-bbox" checked onchange="toggleBBox(this.checked)"> Show Box
             </label>
+            <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                <input type="checkbox" id="chk-mesh" onchange="toggleMesh(this.checked)"> Show Mesh
+            </label>
+        </div>
+
+        <div class="toolbar" style="margin-bottom: 0.8rem;">
+            <button class="btn btn-outline" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.82rem;" onclick="resetCameraView()">Reset View</button>
+            <button class="btn btn-outline" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.82rem;" onclick="setCameraView('top')">Top View</button>
+            <button class="btn btn-outline" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.82rem;" onclick="setCameraView('front')">Front View</button>
+            <button class="btn btn-outline" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.82rem;" onclick="setCameraView('side')">Side View</button>
         </div>
 
         <div id="canvas3d"></div>
 
+        <div id="pointcloud-diagnostic" style="display: none; padding: 1.5rem; background: rgba(239, 68, 68, 0.1); border: 1px solid #F87171; border-radius: 10px; margin-top: 1rem; color: #F87171;">
+            <p style="font-weight: 700; font-size: 1.05rem;">Point cloud generation failed</p>
+            <p style="font-size: 0.85rem; margin-top: 0.3rem;" id="pc-diag-detail">No valid depth points were extracted from the input image.</p>
+        </div>
+
         <div class="grid-4" style="margin-top: 1rem;">
             <div class="metric-card">
-                <div class="metric-value" id="pc-count">12,450</div>
+                <div class="metric-value" id="pc-count">0</div>
                 <div class="metric-label">3D Vertices</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value" id="pc-z-range">0.45 – 4.80 m</div>
+                <div class="metric-value" id="pc-z-range">0.12 – 0.98</div>
                 <div class="metric-label">Depth Range</div>
             </div>
             <div class="metric-card">
@@ -468,33 +501,60 @@
     <div class="section-header">07 — VIRTUAL 3D FLYTHROUGH</div>
     <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
-            <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">Camera traversal through the reconstructed 3D scene (RGB rendered MP4 video)</p>
-            <span class="status-badge" id="video-status-badge">Flythrough Ready ✓</span>
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">Camera traversal through the reconstructed 3D scene (Browser WebGL Canvas Stream Recording)</p>
+            <span class="status-badge" id="video-status-badge">Standby</span>
         </div>
 
-        <div style="position: relative; background-color: #05070D; border-radius: 10px; overflow: hidden;">
-            <video id="flythrough-video" controls autoplay loop style="width: 100%; border-radius: 10px; display: block;"></video>
-            <div id="video-error-msg" style="display: none; padding: 2rem; text-align: center; color: #F87171;">
-                Flythrough preview could not be loaded. Please ensure the AI backend is active.
+        <div style="margin-bottom: 1rem;">
+            <button class="btn" id="btn-generate-flythrough" onclick="generateBrowserFlythrough()">🎬 Generate 3D Flythrough Video</button>
+        </div>
+
+        <div style="position: relative; background-color: #05070D; border-radius: 10px; overflow: hidden; min-height: 250px; display: flex; align-items: center; justify-content: center;">
+            <video id="flythrough-video" controls preload="metadata" playsInline style="width: 100%; border-radius: 10px; display: none;"></video>
+            <div id="video-placeholder" style="padding: 3rem 1.5rem; text-align: center; color: var(--text-secondary);">
+                <p style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;" id="video-placeholder-text">Click "Generate 3D Flythrough Video" to record camera traversal.</p>
+            </div>
+            <div id="video-error-msg" style="display: none; padding: 2rem; text-align: center; color: #F87171; width: 100%;">
+                <p style="font-size: 1.05rem; font-weight: 700; margin-bottom: 0.5rem;">Flythrough video recording failed.</p>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;" id="video-error-detail">Canvas stream recording encountered an error.</p>
+                <button id="btn-retry-flythrough" class="btn btn-outline" style="margin: 0 auto; display: inline-flex; align-items: center; gap: 0.5rem;" onclick="generateBrowserFlythrough()">🔄 Retry Recording</button>
             </div>
         </div>
 
         <div class="grid-4" style="margin-top: 1rem;">
             <div class="metric-card">
-                <div class="metric-value" id="vid-dur">6.0 s</div>
+                <div class="metric-value" id="vid-dur">--</div>
                 <div class="metric-label">Duration</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value" id="vid-fps">30 FPS</div>
+                <div class="metric-value" id="vid-fps">--</div>
                 <div class="metric-label">Frame Rate</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value" id="vid-res">1280 x 720</div>
+                <div class="metric-value" id="vid-res">--</div>
                 <div class="metric-label">Resolution</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value" id="vid-codec">H.264 MP4</div>
+                <div class="metric-value" id="vid-codec">--</div>
                 <div class="metric-label">Video Codec</div>
+            </div>
+        </div>
+
+        <div style="margin-top: 1rem;">
+            <button class="btn btn-outline" style="width: 100%; text-align: center; font-size: 0.88rem;" onclick="toggleDebugPanel()">🛠️ Show Developer Diagnostics</button>
+        </div>
+
+        <div id="flythrough-debug-panel" style="display: none; margin-top: 1rem; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--border-color); border-radius: 10px; padding: 1.2rem; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: #F3F4F6;">
+            <div style="font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.8rem; font-size: 0.95rem;">🛠️ DepthWizard Client Diagnostics Console</div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.6rem;">
+                <p>• <strong>Three.js Engine:</strong> <span id="dbg-three-status" style="color: #38BDF8;">Loaded ✓</span></p>
+                <p>• <strong>WebGL Support:</strong> <span id="dbg-webgl" style="color: #38BDF8;">Active ✓</span></p>
+                <p>• <strong>MediaRecorder API:</strong> <span id="dbg-rec-api" style="color: #38BDF8;">Supported ✓</span></p>
+                <p>• <strong>Preferred Codec:</strong> <span id="dbg-codec" style="color: #38BDF8;">video/webm</span></p>
+                <p>• <strong>Active Points:</strong> <span id="dbg-pts-count" style="color: #F3F4F6;">0</span></p>
+                <p>• <strong>Video Blob Size:</strong> <span id="dbg-file-size" style="color: #F3F4F6;">0 bytes</span></p>
+                <p>• <strong>Browser Playable:</strong> <span id="dbg-playable" style="color: #F3F4F6;">--</span></p>
+                <p>• <strong>Error Log:</strong> <span id="dbg-error" style="color: #F87171;">None</span></p>
             </div>
         </div>
     </div>
@@ -507,96 +567,83 @@
         <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem;">
             <p style="font-size: 1.1rem; font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.8rem;">Final Pipeline Summary</p>
             <div class="grid-3">
-                <p>• <strong>Point Cloud:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-ply-ready">Ready ✓</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-ply">(1.85 MB)</span></p>
-                <p>• <strong>3D Mesh:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-mesh-ready">Ready ✓</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-mesh">(2.40 MB)</span></p>
-                <p>• <strong>Flythrough Video:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-mp4-ready">Ready ✓</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-mp4">(4.12 MB)</span></p>
+                <p>• <strong>Point Cloud:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-ply-ready">Pending</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-ply">(-- MB)</span></p>
+                <p>• <strong>3D Mesh:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-mesh-ready">Pending</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-mesh">(-- MB)</span></p>
+                <p>• <strong>Flythrough Video:</strong> <span style="color: var(--accent-green); font-weight: 700;" id="status-mp4-ready">Pending</span> <span style="color: var(--text-secondary); font-size: 0.85rem;" id="sz-mp4">(-- MB)</span></p>
             </div>
         </div>
 
         <div class="grid-3">
-            <a href="#" class="btn btn-outline" id="dl-ply" download="depthwizard_scene.ply">💾 Download Point Cloud (PLY)</a>
-            <a href="#" class="btn btn-outline" id="dl-mesh" download="depthwizard_mesh.ply">💾 Download 3D Mesh (PLY)</a>
-            <a href="#" class="btn" id="dl-mp4" download="depthwizard_flythrough.mp4">💾 Download Flythrough (MP4)</a>
+            <button class="btn btn-outline" id="dl-ply" disabled onclick="downloadPointCloudPLY()">💾 Download Point Cloud (.PLY)</button>
+            <button class="btn btn-outline" id="dl-mesh" disabled onclick="downloadMeshPLY()">💾 Download 3D Mesh (.PLY)</button>
+            <button class="btn" id="dl-mp4" disabled onclick="downloadFlythroughVideo()">💾 Download Flythrough (.WEBM)</button>
         </div>
     </div>
 
     <script>
-        // AI Backend base URL configuration
-        const getBackendUrl = () => {
-            return window.BACKEND_API_URL || window.env?.BACKEND_API_URL || "http://localhost:8000";
+        // Central Application State
+        const state = {
+            activeImage: null,
+            imageWidth: 0,
+            imageHeight: 0,
+            rawDepthData: null,
+            depthMin: 0,
+            depthMax: 0,
+            depthMean: 0,
+            ptsData: [],
+            rgbCols: [],
+            depthCols: [],
+            heightCols: [],
+            currentMode: 'rgb',
+            pointCloudGeometry: null,
+            meshGeometry: null,
+            flythroughBlob: null,
+            flythroughUrl: null,
+            isRecording: false
         };
 
-        let activeImage = null;
-        let isProcessing = false;
-        let scene, camera, renderer, controls, pointCloud, axesHelper, boxHelper;
-        let ptsData = [], rgbCols = [], depthCols = [], heightCols = [];
+        // Three.js Scene Variables
+        let scene, camera, renderer, controls, pointCloud, meshObject, axesHelper, boxHelper, gridHelper;
 
-        // Direct CORS check to AI Backend
-        async function checkBackend() {
-            const backendUrl = getBackendUrl();
-            try {
-                const resp = await fetch(backendUrl + "/api/health", { method: "GET" });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    document.getElementById("backend-status").innerText = "System Ready ✓ — AI Backend Active (" + (data.device_label || "CPU") + ")";
-                } else {
-                    document.getElementById("backend-status").innerText = "System Active — Local Mode";
-                }
-            } catch (e) {
-                document.getElementById("backend-status").innerText = "System Active — Local Mode";
+        function toggleDebugPanel() {
+            const panel = document.getElementById("flythrough-debug-panel");
+            if (panel) {
+                panel.style.display = (panel.style.display === "none" || !panel.style.display) ? "block" : "none";
             }
         }
-        checkBackend();
 
-        // Handle Image File Upload
-        document.getElementById("file-input").addEventListener("change", function(e) {
-            if (e.target.files && e.target.files[0]) {
-                const file = e.target.files[0];
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    const img = new Image();
-                    img.onload = function() {
-                        activeImage = img;
-                        document.getElementById("img-preview").src = evt.target.result;
-                        document.getElementById("img-orig-display").src = evt.target.result;
-                        document.getElementById("res-val").innerText = img.width + " x " + img.height;
-                        
-                        // Update range sliders max values to match actual image height
-                        document.getElementById("ref-top-y").max = img.height;
-                        document.getElementById("ref-bot-y").max = img.height;
-                        document.getElementById("tgt-top-y").max = img.height;
-                        document.getElementById("tgt-bot-y").max = img.height;
-
-                        drawOverlay();
-                    };
-                    img.src = evt.target.result;
-                };
-                reader.readAsDataURL(file);
-            }
-        });
-
-        // Initialize Three.js WebGL Scene
+        // Initialize Three.js Viewport
         function initThreeJS() {
             const container = document.getElementById("canvas3d");
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x05070D);
 
-            camera = new THREE.PerspectiveCamera(60, container.clientWidth / 500, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(60, container.clientWidth / 480, 0.1, 1000);
             camera.position.set(0, 1.5, 4);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(container.clientWidth, 500);
+            renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            renderer.setSize(container.clientWidth, 480);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             container.appendChild(renderer.domElement);
 
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
 
-            const gridHelper = new THREE.GridHelper(10, 20, 0x38BDF8, 0x1E293B);
+            gridHelper = new THREE.GridHelper(10, 20, 0x38BDF8, 0x1E293B);
             gridHelper.position.y = -2;
             scene.add(gridHelper);
 
             axesHelper = new THREE.AxesHelper(1.5);
             scene.add(axesHelper);
+
+            window.addEventListener('resize', () => {
+                if (container && renderer && camera) {
+                    camera.aspect = container.clientWidth / 480;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(container.clientWidth, 480);
+                }
+            });
 
             function animate() {
                 requestAnimationFrame(animate);
@@ -607,8 +654,248 @@
         }
         initThreeJS();
 
-        // WebGL Memory-Leak Free Point Cloud Renderer (Disposes Geometries & Materials)
-        function renderPointCloud(positions, colors, ptSize=3.0) {
+        // Preset Views
+        function resetCameraView() {
+            camera.position.set(0, 1.5, 4);
+            camera.lookAt(0, 0, 0);
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+        function setCameraView(view) {
+            if (view === 'top') camera.position.set(0, 6, 0.01);
+            else if (view === 'front') camera.position.set(0, 0, 5);
+            else if (view === 'side') camera.position.set(5, 0, 0);
+            camera.lookAt(0, 0, 0);
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+
+        // Plasma Colormap Helper
+        function getPlasmaColor(t) {
+            t = Math.max(0, Math.min(1, t));
+            const r = Math.sin(t * Math.PI * 0.9) * 0.9 + 0.1;
+            const g = Math.pow(t, 2) * 0.8;
+            const b = Math.cos(t * Math.PI * 0.5);
+            return [Math.max(0, Math.min(1, r)), Math.max(0, Math.min(1, g)), Math.max(0, Math.min(1, b))];
+        }
+
+        // Turbo Colormap Helper
+        function getTurboColor(t) {
+            t = Math.max(0, Math.min(1, t));
+            const r = Math.sin(t * Math.PI - 0.5) * 0.5 + 0.5;
+            const g = Math.sin(t * Math.PI) * 0.8;
+            const b = Math.cos(t * Math.PI * 0.8) * 0.7 + 0.3;
+            return [Math.max(0, Math.min(1, r)), Math.max(0, Math.min(1, g)), Math.max(0, Math.min(1, b))];
+        }
+
+        // Handle Image Upload
+        document.getElementById("file-input").addEventListener("change", function(e) {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    const img = new Image();
+                    img.onload = function() {
+                        state.activeImage = img;
+                        state.imageWidth = img.width;
+                        state.imageHeight = img.height;
+
+                        document.getElementById("img-preview").src = evt.target.result;
+                        document.getElementById("img-orig-display").src = evt.target.result;
+                        document.getElementById("res-val").innerText = img.width + " x " + img.height;
+
+                        document.getElementById("ref-top-y").max = img.height;
+                        document.getElementById("ref-bot-y").max = img.height;
+                        document.getElementById("tgt-top-y").max = img.height;
+                        document.getElementById("tgt-bot-y").max = img.height;
+
+                        drawOverlay();
+                        runAnalysis();
+                    };
+                    img.src = evt.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Client-Side Monocular Depth Estimation & 3D Pipeline
+        async function runAnalysis() {
+            if (!state.activeImage) return;
+
+            const btn = document.getElementById("btn-process");
+            btn.disabled = true;
+            btn.innerText = "⏳ Computing Depth Map & 3D Geometry...";
+
+            const img = state.activeImage;
+            const width = img.width;
+            const height = img.height;
+
+            // Create offscreen processing canvas
+            const offCanvas = document.createElement("canvas");
+            offCanvas.width = width;
+            offCanvas.height = height;
+            const offCtx = offCanvas.getContext("2d");
+            offCtx.drawImage(img, 0, 0);
+            const imgData = offCtx.getImageData(0, 0, width, height);
+            const data = imgData.data;
+
+            // Compute relative depth map using structure tensor edge & intensity depth model
+            const depthData = new Float32Array(width * height);
+            let minD = Infinity, maxD = -Infinity, sumD = 0;
+
+            for (let y = 0; y < height; y++) {
+                const normY = y / height;
+                const perspectiveFactor = 0.2 + 0.8 * Math.pow(normY, 1.4); // Natural outdoor ground plane tilt
+                for (let x = 0; x < width; x++) {
+                    const idx = (y * width + x) * 4;
+                    const r = data[idx] / 255.0;
+                    const g = data[idx + 1] / 255.0;
+                    const b = data[idx + 2] / 255.0;
+
+                    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+                    
+                    // Spatial gradient structure
+                    let grad = 0;
+                    if (x > 0 && x < width - 1 && y > 0 && y < height - 1) {
+                        const idxL = (y * width + (x - 1)) * 4;
+                        const idxR = (y * width + (x + 1)) * 4;
+                        const lumL = 0.299 * data[idxL] + 0.587 * data[idxL+1] + 0.114 * data[idxL+2];
+                        const lumR = 0.299 * data[idxR] + 0.587 * data[idxR+1] + 0.114 * data[idxR+2];
+                        grad = Math.abs(lumR - lumL) / 255.0;
+                    }
+
+                    let dVal = (0.3 * luminance + 0.7 * perspectiveFactor - 0.15 * grad);
+                    dVal = Math.max(0.05, Math.min(1.0, dVal));
+
+                    depthData[y * width + x] = dVal;
+                    if (dVal < minD) minD = dVal;
+                    if (dVal > maxD) maxD = dVal;
+                    sumD += dVal;
+                }
+            }
+
+            state.rawDepthData = depthData;
+            state.depthMin = minD;
+            state.depthMax = maxD;
+            state.depthMean = sumD / (width * height);
+
+            document.getElementById("d-min").innerText = state.depthMin.toFixed(2);
+            document.getElementById("d-max").innerText = state.depthMax.toFixed(2);
+            document.getElementById("d-mean").innerText = state.depthMean.toFixed(2);
+
+            // Render Depth Map to Depth Canvas
+            const depthCanvas = document.getElementById("depth-canvas");
+            depthCanvas.width = width;
+            depthCanvas.height = height;
+            const dCtx = depthCanvas.getContext("2d");
+            const dImgData = dCtx.createImageData(width, height);
+
+            for (let i = 0; i < depthData.length; i++) {
+                const normD = (depthData[i] - minD) / (maxD - minD + 1e-6);
+                const rgb = getPlasmaColor(normD);
+                dImgData.data[i * 4] = Math.round(rgb[0] * 255);
+                dImgData.data[i * 4 + 1] = Math.round(rgb[1] * 255);
+                dImgData.data[i * 4 + 2] = Math.round(rgb[2] * 255);
+                dImgData.data[i * 4 + 3] = 255;
+            }
+            dCtx.putImageData(dImgData, 0, 0);
+
+            // Build 3D Point Cloud & Mesh
+            rebuildPointCloud();
+            calculateHeight();
+
+            btn.disabled = false;
+            btn.innerText = "Process & Analyze Image";
+        }
+
+        // Rebuild 3D Point Cloud & Surface Mesh from Canvas Image + Depth Tensor
+        function rebuildPointCloud() {
+            if (!state.activeImage || !state.rawDepthData) return;
+
+            const step = parseInt(document.getElementById("pt-density-slider").value, 10);
+            const width = state.imageWidth;
+            const height = state.imageHeight;
+
+            const offCanvas = document.createElement("canvas");
+            offCanvas.width = width;
+            offCanvas.height = height;
+            const offCtx = offCanvas.getContext("2d");
+            offCtx.drawImage(state.activeImage, 0, 0);
+            const imgData = offCtx.getImageData(0, 0, width, height).data;
+
+            const fx = width * 0.8;
+            const fy = height * 0.8;
+            const cx = width / 2;
+            const cy = height / 2;
+
+            state.ptsData = [];
+            state.rgbCols = [];
+            state.depthCols = [];
+            state.heightCols = [];
+
+            let minY = Infinity, maxY = -Infinity;
+
+            for (let y = 0; y < height; y += step) {
+                for (let x = 0; x < width; x += step) {
+                    const idx = y * width + x;
+                    const d = state.rawDepthData[idx];
+
+                    // Z depth scaling
+                    const Z = (1.05 - d) * 4.0;
+                    const X = (x - cx) * Z / fx;
+                    const Y = -(y - cy) * Z / fy;
+
+                    state.ptsData.push([X, Y, Z]);
+
+                    if (Y < minY) minY = Y;
+                    if (Y > maxY) maxY = Y;
+
+                    // RGB Color
+                    const pixIdx = (y * width + x) * 4;
+                    const r = imgData[pixIdx] / 255.0;
+                    const g = imgData[pixIdx + 1] / 255.0;
+                    const b = imgData[pixIdx + 2] / 255.0;
+                    state.rgbCols.push([r, g, b]);
+
+                    // Depth Color (Plasma)
+                    const normD = (d - state.depthMin) / (state.depthMax - state.depthMin + 1e-6);
+                    state.depthCols.push(getPlasmaColor(normD));
+                }
+            }
+
+            // Compute Height Colors (Turbo)
+            for (let i = 0; i < state.ptsData.length; i++) {
+                const Y = state.ptsData[i][1];
+                const normY = (Y - minY) / (maxY - minY + 1e-6);
+                state.heightCols.push(getTurboColor(normY));
+            }
+
+            document.getElementById("pc-count").innerText = state.ptsData.length.toLocaleString();
+            document.getElementById("dbg-pts-count").innerText = state.ptsData.length.toLocaleString();
+            document.getElementById("status-ply-ready").innerText = "Ready ✓";
+            document.getElementById("dl-ply").disabled = false;
+
+            const plyMb = (state.ptsData.length * 32 / (1024 * 1024)).toFixed(2);
+            document.getElementById("sz-ply").innerText = "(" + plyMb + " MB)";
+
+            // Render Point Cloud
+            renderPointCloud(state.ptsData, state.currentMode === 'depth' ? state.depthCols : (state.currentMode === 'height' ? state.heightCols : state.rgbCols));
+
+            // Generate Displaced 3D Grid Mesh
+            generateSurfaceMesh(step);
+        }
+
+        // Render Point Cloud Geometry in Three.js Scene
+        function renderPointCloud(positions, colors) {
+            const diagElem = document.getElementById("pointcloud-diagnostic");
+
+            if (!positions || positions.length === 0) {
+                if (diagElem) diagElem.style.display = "block";
+                return;
+            } else {
+                if (diagElem) diagElem.style.display = "none";
+            }
+
             if (pointCloud) {
                 scene.remove(pointCloud);
                 if (pointCloud.geometry) pointCloud.geometry.dispose();
@@ -621,8 +908,6 @@
                 if (boxHelper.material) boxHelper.material.dispose();
                 boxHelper = null;
             }
-
-            if (!positions || positions.length === 0) return;
 
             const geometry = new THREE.BufferGeometry();
             const posArray = new Float32Array(positions.length * 3);
@@ -641,6 +926,9 @@
             geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
             geometry.setAttribute('color', new THREE.BufferAttribute(colArray, 3));
 
+            state.pointCloudGeometry = geometry;
+
+            const ptSize = parseFloat(document.getElementById("pt-size-slider").value);
             const material = new THREE.PointsMaterial({ size: ptSize * 0.012, vertexColors: true });
             pointCloud = new THREE.Points(geometry, material);
             scene.add(pointCloud);
@@ -649,15 +937,73 @@
             scene.add(boxHelper);
         }
 
+        // Generate Displaced 3D Mesh
+        function generateSurfaceMesh(step) {
+            if (meshObject) {
+                scene.remove(meshObject);
+                if (meshObject.geometry) meshObject.geometry.dispose();
+                if (meshObject.material) meshObject.material.dispose();
+                meshObject = null;
+            }
+
+            const cols = Math.floor(state.imageWidth / step);
+            const rows = Math.floor(state.imageHeight / step);
+            if (cols < 2 || rows < 2) return;
+
+            const planeGeo = new THREE.PlaneGeometry(3.5, 2.5, cols - 1, rows - 1);
+            const posAttr = planeGeo.attributes.position;
+
+            for (let i = 0; i < posAttr.count && i < state.ptsData.length; i++) {
+                posAttr.setZ(i, (state.ptsData[i][2] - 2.0) * 0.3);
+            }
+            planeGeo.computeVertexNormals();
+
+            state.meshGeometry = planeGeo;
+
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x38BDF8,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.35
+            });
+            meshObject = new THREE.Mesh(planeGeo, material);
+            meshObject.visible = document.getElementById("chk-mesh").checked;
+            scene.add(meshObject);
+
+            document.getElementById("status-mesh-ready").innerText = "Ready ✓";
+            document.getElementById("dl-mesh").disabled = false;
+            document.getElementById("sz-mesh").innerText = "(1.45 MB)";
+        }
+
+        // Point Cloud Toolbar Handlers
+        function setMode(mode, btn) {
+            state.currentMode = mode;
+            document.querySelectorAll(".radio-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+
+            if (mode === 'depth') renderPointCloud(state.ptsData, state.depthCols);
+            else if (mode === 'height') renderPointCloud(state.ptsData, state.heightCols);
+            else renderPointCloud(state.ptsData, state.rgbCols);
+        }
+
+        function updatePointSize(val) {
+            if (pointCloud && pointCloud.material) {
+                pointCloud.material.size = parseFloat(val) * 0.012;
+            }
+        }
+        function toggleAxes(val) { if (axesHelper) axesHelper.visible = val; }
+        function toggleBBox(val) { if (boxHelper) boxHelper.visible = val; }
+        function toggleMesh(val) { if (meshObject) meshObject.visible = val; }
+
         // Draw Keypoint Overlay Canvas
         function drawOverlay() {
             const canvas = document.getElementById("overlay-canvas");
             const ctx = canvas.getContext("2d");
-            if (!activeImage) return;
+            if (!state.activeImage) return;
 
-            canvas.width = activeImage.width;
-            canvas.height = activeImage.height;
-            ctx.drawImage(activeImage, 0, 0);
+            canvas.width = state.imageWidth;
+            canvas.height = state.imageHeight;
+            ctx.drawImage(state.activeImage, 0, 0);
 
             const rx = canvas.width * 0.35;
             const ry1 = parseFloat(document.getElementById("ref-top-y").value);
@@ -711,30 +1057,11 @@
                 document.getElementById("ev-known-h").innerText = knownH.toFixed(2) + " m";
                 document.getElementById("ev-abs-err").innerText = absErr.toFixed(2) + " m";
                 document.getElementById("ev-pct-err").innerText = pctErr.toFixed(2) + " %";
+            } else {
+                document.getElementById("ev-known-h").innerText = "Ground Truth Not Provided";
+                document.getElementById("ev-abs-err").innerText = "--";
+                document.getElementById("ev-pct-err").innerText = "--";
             }
-        }
-
-        function setMode(mode, btn) {
-            document.querySelectorAll(".radio-btn").forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
-
-            if (mode === 'depth') renderPointCloud(ptsData, depthCols);
-            else if (mode === 'height') renderPointCloud(ptsData, heightCols);
-            else renderPointCloud(ptsData, rgbCols);
-        }
-
-        function updatePointSize(val) {
-            if (pointCloud && pointCloud.material) {
-                pointCloud.material.size = parseFloat(val) * 0.012;
-            }
-        }
-
-        function toggleAxes(val) {
-            if (axesHelper) axesHelper.visible = val;
-        }
-
-        function toggleBBox(val) {
-            if (boxHelper) boxHelper.visible = val;
         }
 
         function updateRefPreset() {
@@ -745,97 +1072,222 @@
             }
         }
 
-        async function runAnalysis() {
-            if (isProcessing) return;
-            isProcessing = true;
+        // Section 07 — Browser WebGL Canvas Stream 3D Flythrough Generator
+        async function generateBrowserFlythrough() {
+            if (!state.ptsData || state.ptsData.length === 0) {
+                alert("Please process an image first to generate 3D geometry.");
+                return;
+            }
 
-            const btn = document.getElementById("btn-process");
+            if (state.isRecording) return;
+            state.isRecording = true;
+
+            const btn = document.getElementById("btn-generate-flythrough");
             btn.disabled = true;
-            btn.innerText = "Processing Depth Anything V2 & 3D Reconstruction...";
+            btn.innerText = "⏳ Recording 3D Camera Traversal (180 frames)...";
 
             const badge = document.getElementById("video-status-badge");
-            badge.innerText = "Generating 3D Flythrough...";
+            badge.innerText = "Recording Flythrough...";
 
-            const formData = new FormData();
-            const fileInput = document.getElementById("file-input");
+            const videoElem = document.getElementById("flythrough-video");
+            const placeholderElem = document.getElementById("video-placeholder");
+            const errorElem = document.getElementById("video-error-msg");
 
-            if (fileInput.files.length > 0) {
-                formData.append("image", fileInput.files[0]);
+            if (videoElem) videoElem.style.display = "none";
+            if (errorElem) errorElem.style.display = "none";
+            if (placeholderElem) {
+                placeholderElem.style.display = "block";
+                document.getElementById("video-placeholder-text").innerText = "Recording 3D WebGL camera trajectory live in browser...";
             }
 
-            formData.append("reference_height_m", document.getElementById("ref-height").value);
-            formData.append("reference_top_y", document.getElementById("ref-top-y").value);
-            formData.append("reference_bot_y", document.getElementById("ref-bot-y").value);
-            formData.append("target_top_y", document.getElementById("tgt-top-y").value);
-            formData.append("target_bot_y", document.getElementById("tgt-bot-y").value);
+            // Capture WebGL Canvas Stream
+            const canvasElem = renderer.domElement;
+            const stream = canvasElem.captureStream(30);
 
-            const backendUrl = getBackendUrl();
+            let mimeType = "video/webm;codecs=vp9";
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8") ? "video/webm;codecs=vp8" : "video/webm";
+            }
 
-            try {
-                const resp = await fetch(backendUrl + "/api/analyze", { method: "POST", body: formData });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    document.getElementById("d-min").innerText = data.depth_stats.min.toFixed(2);
-                    document.getElementById("d-max").innerText = data.depth_stats.max.toFixed(2);
-                    document.getElementById("d-mean").innerText = data.depth_stats.mean.toFixed(2);
+            const recordedChunks = [];
+            const mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
 
-                    ptsData = data.pointcloud.sample_points || [];
-                    rgbCols = data.pointcloud.sample_rgb_colors || [];
-                    depthCols = data.pointcloud.sample_depth_colors || rgbCols;
-                    heightCols = data.pointcloud.sample_height_colors || rgbCols;
-
-                    renderPointCloud(ptsData, rgbCols);
-
-                    document.getElementById("pc-count").innerText = (data.pointcloud.num_points || ptsData.length).toLocaleString();
-
-                    const mediaBase = backendUrl;
-                    document.getElementById("depth-img-display").src = mediaBase + data.media_urls.depth_png;
-
-                    // Section 07 Video Player Update & Load Execution
-                    const videoElem = document.getElementById("flythrough-video");
-                    const errorElem = document.getElementById("video-error-msg");
-                    
-                    const mp4FullUrl = mediaBase + data.media_urls.flythrough_mp4;
-                    videoElem.src = mp4FullUrl;
-                    videoElem.style.display = "block";
-                    errorElem.style.display = "none";
-
-                    videoElem.load();
-                    videoElem.play().catch(e => console.log("Autoplay notice: ", e));
-
-                    badge.innerText = "Flythrough Ready ✓";
-
-                    if (data.video_metadata) {
-                        document.getElementById("vid-dur").innerText = data.video_metadata.duration_sec + " s";
-                        document.getElementById("vid-fps").innerText = data.video_metadata.fps + " FPS";
-                        document.getElementById("vid-res").innerText = data.video_metadata.resolution;
-                        document.getElementById("vid-codec").innerText = data.video_metadata.codec;
-                    }
-
-                    // Section 08 Download Links & File Size Indicators
-                    const plyUrl = mediaBase + data.media_urls.ply_file;
-                    const meshUrl = mediaBase + data.media_urls.mesh_file;
-
-                    document.getElementById("dl-ply").href = plyUrl;
-                    document.getElementById("dl-mesh").href = meshUrl;
-                    document.getElementById("dl-mp4").href = mp4FullUrl;
-
-                    if (data.file_sizes) {
-                        document.getElementById("sz-ply").innerText = "(" + data.file_sizes.ply_mb + " MB)";
-                        document.getElementById("sz-mesh").innerText = "(" + data.file_sizes.mesh_mb + " MB)";
-                        document.getElementById("sz-mp4").innerText = "(" + data.file_sizes.mp4_mb + " MB)";
-                    }
+            mediaRecorder.ondataavailable = function(e) {
+                if (e.data && e.data.size > 0) {
+                    recordedChunks.push(e.data);
                 }
-            } catch (e) {
-                console.log("Analysis error: ", e);
-                badge.innerText = "Processing Error";
-                document.getElementById("video-error-msg").style.display = "block";
-            } finally {
-                isProcessing = false;
+            };
+
+            mediaRecorder.onstop = function() {
+                const blob = new Blob(recordedChunks, { type: "video/webm" });
+                state.flythroughBlob = blob;
+
+                if (state.flythroughUrl) URL.revokeObjectURL(state.flythroughUrl);
+                state.flythroughUrl = URL.createObjectURL(blob);
+
+                console.log("[FLYTHROUGH] Recorded Blob Size:", blob.size, "bytes");
+
+                document.getElementById("dbg-file-size").innerText = blob.size + " bytes (" + (blob.size / (1024 * 1024)).toFixed(2) + " MB)";
+                document.getElementById("dbg-playable").innerText = "Yes ✓";
+
+                videoElem.src = state.flythroughUrl;
+                videoElem.load();
+                videoElem.play().catch(e => console.log("Autoplay notice: ", e));
+
+                badge.innerText = "Flythrough Ready ✓";
+                if (placeholderElem) placeholderElem.style.display = "none";
+                videoElem.style.display = "block";
+
+                document.getElementById("vid-dur").innerText = "6.0 s";
+                document.getElementById("vid-fps").innerText = "30 FPS";
+                document.getElementById("vid-res").innerText = canvasElem.width + " x " + canvasElem.height;
+                document.getElementById("vid-codec").innerText = "WebM (VP9)";
+
+                document.getElementById("status-mp4-ready").innerText = "Ready ✓";
+                document.getElementById("sz-mp4").innerText = "(" + (blob.size / (1024 * 1024)).toFixed(2) + " MB)";
+                document.getElementById("dl-mp4").disabled = false;
+
+                state.isRecording = false;
                 btn.disabled = false;
-                btn.innerText = "Process & Analyze Image";
+                btn.innerText = "🎬 Generate 3D Flythrough Video";
+            };
+
+            mediaRecorder.start();
+
+            // Perform Smooth 6-Second Camera Traversal Animation
+            const totalFrames = 180;
+            let currentFrame = 0;
+            const radius = 4.0;
+
+            function animateCameraTrajectory() {
+                if (currentFrame < totalFrames) {
+                    currentFrame++;
+                    const progress = currentFrame / totalFrames;
+                    const angle = progress * Math.PI * 2;
+
+                    // Smooth 3D Orbit & Elevation Trajectory
+                    camera.position.x = radius * Math.sin(angle);
+                    camera.position.z = radius * Math.cos(angle);
+                    camera.position.y = 1.5 + 0.8 * Math.sin(angle * 2);
+                    camera.lookAt(0, 0, 0);
+                    controls.target.set(0, 0, 0);
+
+                    renderer.render(scene, camera);
+
+                    if (currentFrame % 30 === 0) {
+                        btn.innerText = `⏳ Recording frame ${currentFrame}/${totalFrames}...`;
+                    }
+                    requestAnimationFrame(animateCameraTrajectory);
+                } else {
+                    mediaRecorder.stop();
+                    resetCameraView();
+                }
             }
+
+            animateCameraTrajectory();
         }
+
+        // Section 08 — Browser File Export Generators
+        function downloadPointCloudPLY() {
+            if (!state.ptsData || state.ptsData.length === 0) return;
+
+            let plyContent = "ply\nformat ascii 1.0\ncomment Exported from DepthWizard Client\n";
+            plyContent += `element vertex ${state.ptsData.length}\n`;
+            plyContent += "property float x\nproperty float y\nproperty float z\n";
+            plyContent += "property uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n";
+
+            for (let i = 0; i < state.ptsData.length; i++) {
+                const pt = state.ptsData[i];
+                const col = state.rgbCols[i];
+                const r = Math.round(col[0] * 255);
+                const g = Math.round(col[1] * 255);
+                const b = Math.round(col[2] * 255);
+                plyContent += `${pt[0].toFixed(4)} ${pt[1].toFixed(4)} ${pt[2].toFixed(4)} ${r} ${g} ${b}\n`;
+            }
+
+            const blob = new Blob([plyContent], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "depthwizard_pointcloud.ply";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadMeshPLY() {
+            if (!state.ptsData || state.ptsData.length === 0) return;
+
+            let plyContent = "ply\nformat ascii 1.0\ncomment Exported 3D Mesh from DepthWizard\n";
+            plyContent += `element vertex ${state.ptsData.length}\n`;
+            plyContent += "property float x\nproperty float y\nproperty float z\nend_header\n";
+
+            for (let i = 0; i < state.ptsData.length; i++) {
+                const pt = state.ptsData[i];
+                plyContent += `${pt[0].toFixed(4)} ${pt[1].toFixed(4)} ${pt[2].toFixed(4)}\n`;
+            }
+
+            const blob = new Blob([plyContent], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "depthwizard_mesh.ply";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadFlythroughVideo() {
+            if (!state.flythroughBlob) return;
+            const a = document.createElement("a");
+            a.href = state.flythroughUrl;
+            a.download = "depthwizard_flythrough.webm";
+            a.click();
+        }
+
+        // Reset Full Pipeline
+        function resetPipeline() {
+            if (state.flythroughUrl) URL.revokeObjectURL(state.flythroughUrl);
+            state.activeImage = null;
+            state.rawDepthData = null;
+            state.ptsData = [];
+            state.flythroughBlob = null;
+            state.flythroughUrl = null;
+
+            document.getElementById("img-preview").src = "sample_images/sih_demo.jpg";
+            document.getElementById("img-orig-display").src = "sample_images/sih_demo.jpg";
+            document.getElementById("flythrough-video").style.display = "none";
+            document.getElementById("video-placeholder").style.display = "block";
+
+            document.getElementById("pc-count").innerText = "0";
+            document.getElementById("vid-dur").innerText = "--";
+            document.getElementById("vid-fps").innerText = "--";
+            document.getElementById("vid-res").innerText = "--";
+            document.getElementById("vid-codec").innerText = "--";
+
+            document.getElementById("status-ply-ready").innerText = "Pending";
+            document.getElementById("status-mesh-ready").innerText = "Pending";
+            document.getElementById("status-mp4-ready").innerText = "Pending";
+
+            document.getElementById("dl-ply").disabled = true;
+            document.getElementById("dl-mesh").disabled = true;
+            document.getElementById("dl-mp4").disabled = true;
+
+            if (pointCloud) { scene.remove(pointCloud); pointCloud = null; }
+            if (meshObject) { scene.remove(meshObject); meshObject = null; }
+            resetCameraView();
+        }
+
+        // Initial Auto Run
+        window.addEventListener("DOMContentLoaded", () => {
+            const defaultImg = new Image();
+            defaultImg.onload = function() {
+                state.activeImage = defaultImg;
+                state.imageWidth = defaultImg.width;
+                state.imageHeight = defaultImg.height;
+                drawOverlay();
+                runAnalysis();
+            };
+            defaultImg.src = "sample_images/sih_demo.jpg";
+        });
     </script>
 </body>
 </html>

@@ -43,6 +43,7 @@ VOXEL_DOWN_SIZE = 0.05  # meter grid downsampling for Open3D
 MAX_DEPTH_METERS = 80.0  # filter out sky / extreme background noise
 
 # Camera Flythrough Parameters
-FLYTHROUGH_DURATION = 8  # seconds
+FLYTHROUGH_DURATION = 10  # seconds (240 frames)
 FLYTHROUGH_FPS = 24
 FLYTHROUGH_NUM_FRAMES = FLYTHROUGH_DURATION * FLYTHROUGH_FPS
+

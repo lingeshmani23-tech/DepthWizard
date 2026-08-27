@@ -506,12 +506,14 @@ elif LOCAL_PIPELINE_AVAILABLE and "dist_depth" in st.session_state:
     # Depth colormap
     z_vals = points_3d[:, 2] if len(points_3d) > 0 else np.array([0])
     z_norm = (z_vals - np.min(z_vals)) / (np.ptp(z_vals) + 1e-6)
-    cols_depth_sample = cm.get_cmap("plasma")(z_norm)[:, :3].tolist()
+    cmap_plasma = cm.colormaps["plasma"] if hasattr(cm, "colormaps") else cm.get_cmap("plasma")
+    cols_depth_sample = cmap_plasma(z_norm)[:, :3].tolist()
 
     # Height colormap
     y_vals = points_3d[:, 1] if len(points_3d) > 0 else np.array([0])
     y_norm = (y_vals - np.min(y_vals)) / (np.ptp(y_vals) + 1e-6)
-    cols_height_sample = cm.get_cmap("turbo")(y_norm)[:, :3].tolist()
+    cmap_turbo = cm.colormaps["turbo"] if hasattr(cm, "colormaps") else cm.get_cmap("turbo")
+    cols_height_sample = cmap_turbo(y_norm)[:, :3].tolist()
 
     ply_download_url = None
     mesh_download_url = None

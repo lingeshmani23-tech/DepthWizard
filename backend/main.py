@@ -19,6 +19,7 @@ import torch
 import numpy as np
 from PIL import Image
 import matplotlib.cm as cm
+import matplotlib.pyplot as plt
 
 # Add project root to sys.path
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,7 +32,7 @@ from src.depth_engine import estimate_depth, convert_to_distance_like_depth, sav
 from src.calibration import calibrate_scene
 from src.height_estimator import estimate_height
 from src.evaluation import evaluate_height
-from src.pointcloud import create_point_cloud, reconstruct_surface_mesh, save_point_cloud_ply, save_mesh_ply
+from src.pointcloud import create_point_cloud, reconstruct_surface_mesh, save_point_cloud_ply, save_mesh_ply, load_point_cloud_ply
 from src.flythrough import generate_flythrough
 
 # Setup structured logging
@@ -227,7 +228,7 @@ async def analyze_image(
             output_path=str(mp4_path),
             duration_sec=config.FLYTHROUGH_DURATION,
             fps=config.FLYTHROUGH_FPS,
-            resolution=(1280, 720)
+            resolution=(640, 480)
         )
         logger.info(f"Session [{session_id}] Flythrough rendering complete.")
 
@@ -244,19 +245,18 @@ async def analyze_image(
         # Depth colormap (Plasma)
         z_vals = pts_sample[:, 2]
         z_norm = (z_vals - np.min(z_vals)) / (np.ptp(z_vals) + 1e-6)
-        depth_cols = cm.get_cmap("plasma")(z_norm)[:, :3].tolist()
+        depth_cols = plt.get_cmap("plasma")(z_norm)[:, :3].tolist()
 
         # Height colormap (Turbo/Spectral)
         y_vals = pts_sample[:, 1]
         y_norm = (y_vals - np.min(y_vals)) / (np.ptp(y_vals) + 1e-6)
-        height_cols = cm.get_cmap("turbo")(y_norm)[:, :3].tolist()
+        height_cols = plt.get_cmap("turbo")(y_norm)[:, :3].tolist()
 
         # Compute file sizes in MB
         ply_size_mb = round(ply_path.stat().st_size / (1024 * 1024), 2) if ply_path.exists() else 0.0
         mesh_size_mb = round(mesh_ply_path.stat().st_size / (1024 * 1024), 2) if mesh_ply_path.exists() else 0.0
         mp4_size_mb = round(mp4_path.stat().st_size / (1024 * 1024), 2) if mp4_path.exists() else 0.0
 
-        # Base URL for static assets
         base_url = "/api/media"
 
         return JSONResponse(content={
@@ -282,18 +282,28 @@ async def analyze_image(
                 "mesh_mb": mesh_size_mb,
                 "mp4_mb": mp4_size_mb
             },
+            "flythrough": {
+                "url": f"/outputs/{session_id}/flythrough.mp4",
+                "download_url": f"/download/{session_id}/flythrough",
+                "duration": config.FLYTHROUGH_DURATION,
+                "fps": config.FLYTHROUGH_FPS,
+                "frames": config.FLYTHROUGH_DURATION * config.FLYTHROUGH_FPS,
+                "resolution": "640x480",
+                "codec": "H.264 MP4 (yuv420p)"
+            },
             "video_metadata": {
                 "duration_sec": config.FLYTHROUGH_DURATION,
                 "fps": config.FLYTHROUGH_FPS,
                 "frames": config.FLYTHROUGH_DURATION * config.FLYTHROUGH_FPS,
-                "resolution": "1280x720",
-                "codec": "H.264 MP4"
+                "resolution": "640x480",
+                "codec": "H.264 MP4 (yuv420p)"
             },
             "media_urls": {
                 "depth_png": f"{base_url}/{session_id}/depth_visualization.png",
                 "ply_file": f"{base_url}/{session_id}/scene.ply",
                 "mesh_file": f"{base_url}/{session_id}/scene_mesh.ply",
-                "flythrough_mp4": f"{base_url}/{session_id}/flythrough.mp4"
+                "flythrough_mp4": f"/outputs/{session_id}/flythrough.mp4",
+                "download_mp4": f"/download/{session_id}/flythrough"
             }
         })
 
@@ -302,10 +312,130 @@ async def analyze_image(
         raise HTTPException(status_code=500, detail=f"Pipeline processing error: {str(e)}")
 
 
+@app.get("/outputs/{job_id}/flythrough.mp4")
+def serve_output_flythrough(job_id: str):
+    """
+    Stream inline playable H.264 MP4 video for HTML5 <video> elements.
+    """
+    cleaned_id = job_id.replace("session_", "")
+    possible_paths = [
+        config.OUTPUT_DIR / f"session_{cleaned_id}" / "flythrough.mp4",
+        config.OUTPUT_DIR / job_id / "flythrough.mp4",
+        config.OUTPUTS_DIR / job_id / "flythrough.mp4"
+    ]
+
+    target_path = None
+    for p in possible_paths:
+        if p.exists():
+            target_path = p
+            break
+
+    if not target_path:
+        raise HTTPException(status_code=404, detail=f"Flythrough video not found for job_id: {job_id}")
+
+    return FileResponse(
+        str(target_path),
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=3600"
+        }
+    )
+
+
+@app.get("/download/{job_id}/flythrough")
+def download_output_flythrough(job_id: str):
+    """
+    Download generated MP4 video as attachment.
+    """
+    cleaned_id = job_id.replace("session_", "")
+    possible_paths = [
+        config.OUTPUT_DIR / f"session_{cleaned_id}" / "flythrough.mp4",
+        config.OUTPUT_DIR / job_id / "flythrough.mp4",
+        config.OUTPUTS_DIR / job_id / "flythrough.mp4"
+    ]
+
+    target_path = None
+    for p in possible_paths:
+        if p.exists():
+            target_path = p
+            break
+
+    if not target_path:
+        raise HTTPException(status_code=404, detail=f"Flythrough video not found for job_id: {job_id}")
+
+    return FileResponse(
+        str(target_path),
+        media_type="video/mp4",
+        headers={
+            "Content-Disposition": 'attachment; filename="depthwizard_flythrough.mp4"'
+        }
+    )
+
+
+@app.post("/api/regenerate_flythrough")
+async def regenerate_flythrough(session_id: str = Form(...)):
+    """
+    Regenerates ONLY the 3D Virtual Camera Flythrough Video using existing point cloud / mesh data.
+    Does NOT rerun Depth Anything V2 model inference or height solver.
+    """
+    cleaned_id = session_id.replace("session_", "")
+    session_dir = config.OUTPUT_DIR / f"session_{cleaned_id}"
+    ply_path = session_dir / "scene.ply"
+
+    if not ply_path.exists():
+        raise HTTPException(status_code=404, detail=f"Existing 3D point cloud not found for session [{cleaned_id}]. Please analyze image first.")
+
+    try:
+        logger.info(f"Regenerating flythrough video for session [{cleaned_id}]...")
+        pts_3d, cols_3d = load_point_cloud_ply(str(ply_path))
+
+        mp4_path = session_dir / "flythrough.mp4"
+        generate_flythrough(
+            points=pts_3d,
+            colors=cols_3d,
+            output_path=str(mp4_path),
+            duration_sec=config.FLYTHROUGH_DURATION,
+            fps=config.FLYTHROUGH_FPS,
+            resolution=(640, 480)
+        )
+
+        mp4_size_mb = round(mp4_path.stat().st_size / (1024 * 1024), 2) if mp4_path.exists() else 0.0
+
+        return JSONResponse(content={
+            "status": "success",
+            "session_id": cleaned_id,
+            "file_sizes": {"mp4_mb": mp4_size_mb},
+            "flythrough": {
+                "url": f"/outputs/{cleaned_id}/flythrough.mp4",
+                "download_url": f"/download/{cleaned_id}/flythrough",
+                "duration": config.FLYTHROUGH_DURATION,
+                "fps": config.FLYTHROUGH_FPS,
+                "frames": config.FLYTHROUGH_DURATION * config.FLYTHROUGH_FPS,
+                "resolution": "640x480",
+                "codec": "H.264 MP4 (yuv420p)"
+            },
+            "video_metadata": {
+                "duration_sec": config.FLYTHROUGH_DURATION,
+                "fps": config.FLYTHROUGH_FPS,
+                "frames": config.FLYTHROUGH_DURATION * config.FLYTHROUGH_FPS,
+                "resolution": "640x480",
+                "codec": "H.264 MP4 (yuv420p)"
+            },
+            "media_urls": {
+                "flythrough_mp4": f"/outputs/{cleaned_id}/flythrough.mp4",
+                "download_mp4": f"/download/{cleaned_id}/flythrough"
+            }
+        })
+    except Exception as e:
+        logger.error(f"Regeneration error for session [{cleaned_id}]: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Flythrough regeneration failed: {str(e)}")
+
+
 @app.get("/api/media/{session_id}/{filename}")
 def get_media_file(session_id: str, filename: str):
     """
-    Serve generated static media assets (depth image, PLY cloud, mesh PLY, MP4 video) with attachment disposition.
+    Serve generated static media assets (depth image, PLY cloud, mesh PLY, MP4 video).
     """
     file_path = config.OUTPUT_DIR / f"session_{session_id}" / filename
     if not file_path.exists():
@@ -313,15 +443,20 @@ def get_media_file(session_id: str, filename: str):
 
     if filename.endswith(".png"):
         mime = "image/png"
+        disposition = "inline"
     elif filename.endswith(".mp4"):
         mime = "video/mp4"
+        disposition = "inline"
     elif filename.endswith(".ply") or filename.endswith(".obj"):
         mime = "application/octet-stream"
+        disposition = f'attachment; filename="{filename}"'
     else:
         mime = "application/octet-stream"
+        disposition = f'attachment; filename="{filename}"'
 
     return FileResponse(
         str(file_path),
         media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={"Content-Disposition": disposition}
     )
+

@@ -252,3 +252,38 @@ end_header
             f.write(f"3 {fc[0]} {fc[1]} {fc[2]}\n")
 
     return output_path
+
+
+def load_point_cloud_ply(ply_path: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Load 3D point cloud (points_xyz, colors_rgb) from an ASCII PLY file.
+    """
+    pts = []
+    cols = []
+    if not os.path.exists(ply_path):
+        raise FileNotFoundError(f"PLY file not found at: {ply_path}")
+
+    with open(ply_path, "r", encoding="utf-8", errors="ignore") as f:
+        in_header = True
+        for line in f:
+            line_str = line.strip()
+            if in_header:
+                if line_str == "end_header":
+                    in_header = False
+                continue
+
+            parts = line_str.split()
+            if len(parts) >= 6:
+                try:
+                    x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
+                    r, g, b = float(parts[3]) / 255.0, float(parts[4]) / 255.0, float(parts[5]) / 255.0
+                    pts.append([x, y, z])
+                    cols.append([r, g, b])
+                except ValueError:
+                    continue
+
+    if not pts:
+        raise ValueError(f"No valid 3D points could be parsed from PLY file: {ply_path}")
+
+    return np.array(pts, dtype=np.float32), np.array(cols, dtype=np.float32)
+

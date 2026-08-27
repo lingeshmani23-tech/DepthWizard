@@ -57,7 +57,7 @@ def run_pipeline(
     known_target_height_m: Optional[float] = None,
     fov_deg: float = 60.0,
     voxel_size: float = 0.03,
-    flythrough_duration: int = 6,
+    flythrough_duration: int = 10,
     flythrough_fps: int = 24,
     base_output_dir: str = "outputs",
     progress_callback: Optional[Any] = None
@@ -151,7 +151,8 @@ def run_pipeline(
         colors=colors,
         output_path=mp4_path,
         duration_sec=flythrough_duration,
-        fps=flythrough_fps
+        fps=flythrough_fps,
+        resolution=(640, 480)
     )
 
     if progress_callback:
