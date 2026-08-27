@@ -8,13 +8,16 @@ import os
 import uuid
 import json
 import shutil
+import logging
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+import torch
+import numpy as np
+from PIL import Image
 
 # Add project root to sys.path
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,6 +32,10 @@ from src.height_estimator import estimate_height
 from src.evaluation import evaluate_height
 from src.pointcloud import create_point_cloud, save_point_cloud_ply
 from src.flythrough import generate_flythrough
+
+# Setup structured logging
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s - %(message)s")
+logger = logging.getLogger("depthwizard_backend")
 
 app = FastAPI(
     title="DepthWizard AI Computation Backend",
@@ -52,9 +59,9 @@ async def startup_event():
     """
     Preload Depth Anything V2 model once into memory on server startup.
     """
-    print("[Backend Startup] Preloading Depth Anything V2 model weights...")
+    logger.info("Preloading Depth Anything V2 model weights...")
     dev_status = get_device_status()
-    print(f"[Backend Startup] Compute Device: {dev_status['status_label']}")
+    logger.info(f"Compute Device: {dev_status['status_label']}")
 
 
 @app.get("/")
@@ -103,6 +110,7 @@ async def analyze_image(
     session_id = str(uuid.uuid4())[:8]
     session_dir = config.OUTPUT_DIR / f"session_{session_id}"
     session_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Session [{session_id}] started for file: {image.filename}")
 
     try:
         # 1. Read & Validate Uploaded Image
@@ -110,23 +118,39 @@ async def analyze_image(
         valid, msg, pil_img, np_img = validate_image(image_bytes)
 
         if not valid:
+            logger.error(f"Session [{session_id}] Image validation failed: {msg}")
             raise HTTPException(status_code=400, detail=f"Invalid image file: {msg}")
 
+        logger.info(f"Session [{session_id}] Image validated successfully.")
+
+        # Resolution Protection: Resize if > 2048 px to prevent OOM
+        max_dim = 2048
         img_h, img_w = np_img.shape[:2]
+        if max(img_h, img_w) > max_dim:
+            scale = max_dim / float(max(img_h, img_w))
+            new_w, new_h = int(img_w * scale), int(img_h * scale)
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            np_img = np.array(pil_img)
+            img_h, img_w = np_img.shape[:2]
+            logger.info(f"Session [{session_id}] Resized large image to {img_w}x{img_h} for memory protection.")
+
         input_image_path = session_dir / "input_image.jpg"
         pil_img.save(input_image_path)
 
-        # 2. Depth Anything V2 Inference
-        raw_depth = estimate_depth(np_img)
-        resized_raw_depth = resize_depth_to_image(raw_depth, (img_h, img_w))
-        dist_depth = convert_to_distance_like_depth(resized_raw_depth)
+        # 2. Depth Anything V2 Inference with torch.inference_mode()
+        logger.info(f"Session [{session_id}] Running Depth Anything V2 inference...")
+        with torch.inference_mode():
+            raw_depth = estimate_depth(np_img)
+            resized_raw_depth = resize_depth_to_image(raw_depth, (img_h, img_w))
+            dist_depth = convert_to_distance_like_depth(resized_raw_depth)
         
         depth_npy_path = session_dir / "depth.npy"
         np.save(depth_npy_path, dist_depth)
         _, depth_png_path = save_depth(dist_depth, str(session_dir))
         depth_stats = visualize_depth(dist_depth)
+        logger.info(f"Session [{session_id}] Depth estimation complete.")
 
-        # Default Keypoint Auto-Placement if 0 passed
+        # Keypoint Auto-Placement if 0 passed
         rx = reference_x if reference_x > 0 else int(img_w * 0.35)
         ry1 = reference_top_y if reference_top_y > 0 else int(img_h * 0.30)
         ry2 = reference_bot_y if reference_bot_y > 0 else int(img_h * 0.75)
@@ -136,6 +160,7 @@ async def analyze_image(
         ty2 = target_bot_y if target_bot_y > 0 else int(img_h * 0.90)
 
         # 3. Reference Calibration
+        logger.info(f"Session [{session_id}] Calibrating scene scale...")
         ref_top_pt = (rx, ry1)
         ref_bot_pt = (rx, ry2)
 
@@ -146,8 +171,10 @@ async def analyze_image(
             reference_height_m=reference_height_m,
             fov_deg=fov_deg
         )
+        logger.info(f"Session [{session_id}] Scale factor: {calibration.scale_factor:.6f}")
 
         # 4. Target Height Estimation
+        logger.info(f"Session [{session_id}] Estimating target height...")
         tgt_top_pt = (tx, ty1)
         tgt_bot_pt = (tx, ty2)
 
@@ -157,6 +184,7 @@ async def analyze_image(
             target_bottom=tgt_bot_pt,
             calibration=calibration
         )
+        logger.info(f"Session [{session_id}] Estimated height: {height_res.estimated_height_m:.2f} m")
 
         # 5. Accuracy Evaluation (if ground truth supplied)
         evaluation_dict = None
@@ -170,6 +198,7 @@ async def analyze_image(
             evaluation_dict = eval_res.to_dict()
 
         # 6. 3D Point Cloud Reconstruction
+        logger.info(f"Session [{session_id}] Generating 3D point cloud...")
         metric_depth = dist_depth * calibration.scale_factor
         ply_path = session_dir / "scene.ply"
 
@@ -180,8 +209,10 @@ async def analyze_image(
             voxel_size=voxel_size
         )
         save_point_cloud_ply(points_3d, colors_3d, str(ply_path))
+        logger.info(f"Session [{session_id}] 3D point cloud created with {len(points_3d):,} vertices.")
 
         # 7. Virtual Flythrough MP4 Video Generation
+        logger.info(f"Session [{session_id}] Rendering flythrough MP4 video...")
         mp4_path = session_dir / "flythrough.mp4"
         generate_flythrough(
             points=points_3d,
@@ -190,6 +221,7 @@ async def analyze_image(
             duration_sec=config.FLYTHROUGH_DURATION,
             fps=config.FLYTHROUGH_FPS
         )
+        logger.info(f"Session [{session_id}] Flythrough rendering complete.")
 
         # Base URL for static assets
         base_url = "/api/media"
@@ -226,7 +258,8 @@ async def analyze_image(
         })
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
+        logger.error(f"Session [{session_id}] Pipeline error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Pipeline processing error: {str(e)}")
 
 
 @app.get("/api/media/{session_id}/{filename}")
