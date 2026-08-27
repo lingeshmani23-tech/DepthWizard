@@ -1,6 +1,6 @@
 """
 DEPTHWIZARD — Single-View Height Estimation & 3D Flythrough
-Lightweight Public Frontend (Streamlit)
+Lightweight Public Frontend (Streamlit) with Interactive 3D Viewer & RGB Flythrough
 Entry Point: streamlit run app.py
 """
 
@@ -15,6 +15,7 @@ from PIL import Image
 import cv2
 import streamlit as st
 import streamlit.components.v1 as components
+import matplotlib.cm as cm
 
 # Add project root to sys.path
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,7 +32,7 @@ try:
     from src.calibration import calibrate_scene
     from src.height_estimator import estimate_height
     from src.evaluation import evaluate_height
-    from src.pointcloud import create_point_cloud, save_point_cloud_ply
+    from src.pointcloud import create_point_cloud, reconstruct_surface_mesh, save_point_cloud_ply, save_mesh_ply
     from src.flythrough import generate_flythrough
     LOCAL_PIPELINE_AVAILABLE = True
 except Exception:
@@ -464,43 +465,97 @@ else:
 st.markdown("---")
 
 # ----------------------------------------------------
-# 06 — 3D RECONSTRUCTION
+# 06 — INTERACTIVE 3D RECONSTRUCTION & MESH
 # ----------------------------------------------------
-st.markdown('<div class="section-header">06 — 3D RECONSTRUCTION</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">06 — INTERACTIVE 3D RECONSTRUCTION & MESH</div>', unsafe_allow_html=True)
 
 if backend_online and "api_res" in st.session_state:
     pc_data = st.session_state.api_res.get("pointcloud", {})
     pts_sample = pc_data.get("sample_points", [])
-    cols_sample = pc_data.get("sample_colors", [])
+    cols_rgb_sample = pc_data.get("sample_rgb_colors", pc_data.get("sample_colors", []))
+    cols_depth_sample = pc_data.get("sample_depth_colors", cols_rgb_sample)
+    cols_height_sample = pc_data.get("sample_height_colors", cols_rgb_sample)
     num_pts = pc_data.get("num_points", len(pts_sample))
+    num_verts = pc_data.get("num_mesh_vertices", num_pts)
+    num_faces = pc_data.get("num_mesh_faces", 0)
+    pc_stats_dict = pc_data.get("stats", {})
     ply_download_url = f"{backend_url}{st.session_state.api_res['media_urls']['ply_file']}"
+    mesh_download_url = f"{backend_url}{st.session_state.api_res['media_urls']['mesh_file']}"
 elif LOCAL_PIPELINE_AVAILABLE and "dist_depth" in st.session_state:
     metric_depth = st.session_state.dist_depth * calib_obj.scale_factor
     ply_path = session_dir / "scene.ply"
+    mesh_ply_path = session_dir / "scene_mesh.ply"
 
-    points_3d, colors_3d, pc_stats = create_point_cloud(
+    points_3d, colors_3d, pc_stats_dict = create_point_cloud(
         rgb_img=np_img,
         depth_map=metric_depth,
         intrinsics=calib_obj.camera_intrinsics,
         voxel_size=voxel_setting
     )
     save_point_cloud_ply(points_3d, colors_3d, str(ply_path))
+    
+    mesh_verts, mesh_faces, mesh_cols = reconstruct_surface_mesh(points_3d, colors_3d)
+    save_mesh_ply(mesh_verts, mesh_faces, mesh_cols, str(mesh_ply_path))
+
     num_pts = len(points_3d)
+    num_verts = len(mesh_verts)
+    num_faces = len(mesh_faces)
     pts_sample = points_3d.tolist()
-    cols_sample = colors_3d.tolist()
+    cols_rgb_sample = colors_3d.tolist()
+
+    # Depth colormap
+    z_vals = points_3d[:, 2] if len(points_3d) > 0 else np.array([0])
+    z_norm = (z_vals - np.min(z_vals)) / (np.ptp(z_vals) + 1e-6)
+    cols_depth_sample = cm.get_cmap("plasma")(z_norm)[:, :3].tolist()
+
+    # Height colormap
+    y_vals = points_3d[:, 1] if len(points_3d) > 0 else np.array([0])
+    y_norm = (y_vals - np.min(y_vals)) / (np.ptp(y_vals) + 1e-6)
+    cols_height_sample = cm.get_cmap("turbo")(y_norm)[:, :3].tolist()
+
     ply_download_url = None
+    mesh_download_url = None
 else:
     num_pts = 0
-    pts_sample, cols_sample = [], []
+    num_verts = 0
+    num_faces = 0
+    pts_sample, cols_rgb_sample, cols_depth_sample, cols_height_sample = [], [], [], []
+    pc_stats_dict = {}
     ply_download_url = None
+    mesh_download_url = None
 
-st.write(f"• **Point Count:** `{num_pts:,}` 3D metric vertices")
+# Interactive Viewer Controls Toolbar
+ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 2, 1.5, 1.5])
 
-# Interactive Three.js WebGL Point Cloud Component
-def render_threejs_pointcloud(positions, colors):
+with ctrl_c1:
+    display_mode = st.radio(
+        "Display Mode",
+        ["RGB Point Cloud", "Depth Point Cloud", "Height Visualization", "Shaded Mesh"],
+        horizontal=True
+    )
+
+with ctrl_c2:
+    point_size_val = st.slider("Point Size (px)", min_value=1.0, max_value=8.0, value=3.0, step=0.5)
+
+with ctrl_c3:
+    show_axes_val = st.checkbox("Show Axes (XYZ)", value=True)
+
+with ctrl_c4:
+    show_bbox_val = st.checkbox("Show Bounding Box", value=True)
+
+# Select active color scheme based on user display mode
+if "Depth" in display_mode:
+    active_colors = cols_depth_sample
+elif "Height" in display_mode:
+    active_colors = cols_height_sample
+else:
+    active_colors = cols_rgb_sample
+
+# Render Interactive Three.js WebGL 3D Component
+def render_threejs_interactive_viewer(positions, colors, pt_size=3.0, show_axes=True, show_bbox=True):
     if len(positions) == 0:
-        return "<p style='color:white;'>Empty Point Cloud</p>"
-    
+        return "<p style='color:white; text-align:center;'>Empty 3D Scene</p>"
+
     pts_js = json.dumps(positions)
     cols_js = json.dumps(colors)
 
@@ -509,28 +564,31 @@ def render_threejs_pointcloud(positions, colors):
     <html>
     <head>
         <style>
-            body {{ margin: 0; overflow: hidden; background-color: #05070D; }}
-            #canvas3d {{ width: 100%; height: 450px; border-radius: 8px; }}
+            body {{ margin: 0; overflow: hidden; background-color: #05070D; font-family: sans-serif; }}
+            #canvas3d {{ width: 100%; height: 500px; border-radius: 8px; }}
+            #hud {{ position: absolute; top: 10px; left: 15px; color: #38BDF8; font-size: 13px; font-weight: bold; pointer-events: none; text-shadow: 1px 1px 2px black; }}
         </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     </head>
     <body>
+        <div id="hud">Rotate: Left-Drag | Pan: Right-Drag | Zoom: Scroll</div>
         <div id="canvas3d"></div>
         <script>
             const container = document.getElementById('canvas3d');
             const scene = new THREE.Scene();
             scene.background = new THREE.Color(0x05070D);
 
-            const camera = new THREE.PerspectiveCamera(60, container.clientWidth / 450, 0.1, 1000);
+            const camera = new THREE.PerspectiveCamera(60, container.clientWidth / 500, 0.1, 1000);
             camera.position.set(0, 1.5, 4);
 
             const renderer = new THREE.WebGLRenderer({{ antialias: true }});
-            renderer.setSize(container.clientWidth, 450);
+            renderer.setSize(container.clientWidth, 500);
             container.appendChild(renderer.domElement);
 
             const controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
 
             const positions = {pts_js};
             const colors = {cols_js};
@@ -552,9 +610,19 @@ def render_threejs_pointcloud(positions, colors):
             geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
             geometry.setAttribute('color', new THREE.BufferAttribute(colArray, 3));
 
-            const material = new THREE.PointsMaterial({{ size: 0.035, vertexColors: true }});
+            const material = new THREE.PointsMaterial({{ size: {pt_size * 0.012}, vertexColors: true }});
             const pointCloud = new THREE.Points(geometry, material);
             scene.add(pointCloud);
+
+            if ({str(show_axes).lower()}) {{
+                const axesHelper = new THREE.AxesHelper(1.5);
+                scene.add(axesHelper);
+            }}
+
+            if ({str(show_bbox).lower()} && positions.length > 0) {{
+                const box = new THREE.BoxHelper(pointCloud, 0x38BDF8);
+                scene.add(box);
+            }}
 
             const gridHelper = new THREE.GridHelper(10, 20, 0x38BDF8, 0x1E293B);
             gridHelper.position.y = -2;
@@ -572,68 +640,128 @@ def render_threejs_pointcloud(positions, colors):
     """
     return html_code
 
-components.html(render_threejs_pointcloud(pts_sample, cols_sample), height=470)
+components.html(render_threejs_interactive_viewer(pts_sample, active_colors, point_size_val, show_axes_val, show_bbox_val), height=520)
 
-if ply_download_url:
-    st.markdown(f"[💾 Download PLY Point Cloud]({ply_download_url})")
-elif 'ply_path' in locals() and ply_path.exists():
-    with open(ply_path, "rb") as f:
-        st.download_button(
-            label="Download PLY Point Cloud",
-            data=f.read(),
-            file_name=f"depthwizard_scene_{st.session_state.session_id}.ply",
-            mime="application/octet-stream"
-        )
+# Scene Information & Metric Dimensions Panel
+m_w = pc_stats_dict.get("width_m", 0.0)
+m_h = pc_stats_dict.get("height_m", 0.0)
+m_d = pc_stats_dict.get("depth_m", 0.0)
+z_min = pc_stats_dict.get("z_range", (0.0, 0.0))[0]
+z_max = pc_stats_dict.get("z_range", (0.0, 0.0))[1]
+
+s_col1, s_col2, s_col3, s_col4 = st.columns(4)
+s_col1.markdown(f'<div class="metric-card"><div class="metric-value">{num_pts:,}</div><div class="metric-label">3D Points</div></div>', unsafe_allow_html=True)
+s_col2.markdown(f'<div class="metric-card"><div class="metric-value">{z_min:.2f} – {z_max:.2f} m</div><div class="metric-label">Depth Range</div></div>', unsafe_allow_html=True)
+s_col3.markdown(f'<div class="metric-card"><div class="metric-value">{m_w:.2f} m</div><div class="metric-label">Scene Width</div></div>', unsafe_allow_html=True)
+s_col4.markdown(f'<div class="metric-card"><div class="metric-value">{m_h:.2f} m</div><div class="metric-label">Scene Height</div></div>', unsafe_allow_html=True)
+
+# 3D Distance & Height Measurement Tool
+with st.expander("📏 Interactive 3D Distance & Height Measurement Tool"):
+    m_t1, m_t2 = st.columns(2)
+    with m_t1:
+        st.markdown("**3D Euclidean Distance Tool**")
+        p1_x = st.number_input("Point 1 X (m)", value=0.0, step=0.1)
+        p1_y = st.number_input("Point 1 Y (m)", value=0.0, step=0.1)
+        p1_z = st.number_input("Point 1 Z (m)", value=float(z_min), step=0.1)
+
+        p2_x = st.number_input("Point 2 X (m)", value=0.0, step=0.1)
+        p2_y = st.number_input("Point 2 Y (m)", value=float(est_height_val), step=0.1)
+        p2_z = st.number_input("Point 2 Z (m)", value=float(z_min), step=0.1)
+
+        dist_3d = math.sqrt((p2_x - p1_x)**2 + (p2_y - p1_y)**2 + (p2_z - p1_z)**2)
+        st.info(f"Approximate 3D Distance: **{dist_3d:.2f} m**")
+
+    with m_t2:
+        st.markdown("**Vertical Height Tool**")
+        v_top_y = st.number_input("Top Point Y (m)", value=float(est_height_val), step=0.1)
+        v_bot_y = st.number_input("Bottom Point Y (m)", value=0.0, step=0.1)
+        vert_h = abs(v_top_y - v_bot_y)
+        st.success(f"Estimated Vertical Height: **{vert_h:.2f} m**")
 
 st.markdown("---")
 
 # ----------------------------------------------------
-# 07 — VIRTUAL FLYTHROUGH
+# 07 — 3D MODEL PREVIEW & VIRTUAL FLYTHROUGH
 # ----------------------------------------------------
-st.markdown('<div class="section-header">07 — VIRTUAL FLYTHROUGH</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">07 — VIRTUAL 3D FLYTHROUGH</div>', unsafe_allow_html=True)
+st.caption("Camera traversal through the reconstructed 3D scene (RGB colored rendering)")
+
+gen_fly_btn = st.button("Generate 3D Flythrough", type="primary", use_container_width=True)
 
 if backend_online and "api_res" in st.session_state:
     mp4_url = f"{backend_url}{st.session_state.api_res['media_urls']['flythrough_mp4']}"
     st.video(mp4_url)
-    st.markdown(f"[💾 Download Flythrough MP4]({mp4_url})")
 elif LOCAL_PIPELINE_AVAILABLE and "dist_depth" in st.session_state:
     mp4_path = session_dir / "flythrough.mp4"
     if 'points_3d' in locals() and len(points_3d) > 0:
-        if not mp4_path.exists():
-            with st.spinner("Rendering 3D camera flythrough MP4 video..."):
+        if gen_fly_btn or not mp4_path.exists():
+            with st.spinner("Rendering 3D RGB camera flythrough MP4 video (1280x720 30FPS)..."):
                 generate_flythrough(
                     points=points_3d,
                     colors=colors_3d,
                     output_path=str(mp4_path),
                     duration_sec=config.FLYTHROUGH_DURATION,
-                    fps=config.FLYTHROUGH_FPS
+                    fps=config.FLYTHROUGH_FPS,
+                    resolution=(1280, 720)
                 )
 
         if mp4_path.exists():
             st.video(str(mp4_path))
-            with open(mp4_path, "rb") as vf:
-                st.download_button(
-                    label="Download Flythrough MP4",
-                    data=vf.read(),
-                    file_name=f"depthwizard_flythrough_{st.session_state.session_id}.mp4",
-                    mime="video/mp4"
-                )
 
 st.markdown("---")
 
 # ----------------------------------------------------
-# 08 — FINAL RESULT
+# 08 — FINAL RESULT & EXPORTS
 # ----------------------------------------------------
-st.markdown('<div class="section-header">08 — FINAL RESULT</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">08 — FINAL RESULT & EXPORTS</div>', unsafe_allow_html=True)
 
 st.markdown(f"""
 <div class="summary-box">
     <h3>Final Reconstruction & Estimation Summary</h3>
     <p>• <strong>Estimated Height:</strong> <span style="color:#34D399; font-weight:700; font-size:1.2rem;">{est_height_val:.2f} m</span></p>
-    <p>• <strong>3D Reconstruction:</strong> Generated ✓ ({num_pts:,} vertices)</p>
-    <p>• <strong>Virtual Flythrough:</strong> Generated ✓ (MP4 Video output)</p>
+    <p>• <strong>3D Reconstruction:</strong> Generated ✓ ({num_pts:,} vertices, {num_faces:,} faces)</p>
+    <p>• <strong>Virtual Flythrough:</strong> Generated ✓ (1280x720 MP4 video, RGB rendered)</p>
 </div>
 """, unsafe_allow_html=True)
+
+# Export Buttons
+ex_c1, ex_c2, ex_c3 = st.columns(3)
+
+with ex_c1:
+    if ply_download_url:
+        st.markdown(f"[💾 Download Point Cloud (PLY)]({ply_download_url})")
+    elif 'ply_path' in locals() and ply_path.exists():
+        with open(ply_path, "rb") as f:
+            st.download_button(
+                label="Download Point Cloud (PLY)",
+                data=f.read(),
+                file_name=f"depthwizard_scene_{st.session_state.session_id}.ply",
+                mime="application/octet-stream"
+            )
+
+with ex_c2:
+    if mesh_download_url:
+        st.markdown(f"[💾 Download 3D Mesh (PLY)]({mesh_download_url})")
+    elif 'mesh_ply_path' in locals() and mesh_ply_path.exists():
+        with open(mesh_ply_path, "rb") as mf:
+            st.download_button(
+                label="Download 3D Mesh (PLY)",
+                data=mf.read(),
+                file_name=f"depthwizard_mesh_{st.session_state.session_id}.ply",
+                mime="application/octet-stream"
+            )
+
+with ex_c3:
+    if backend_online and "api_res" in st.session_state:
+        st.markdown(f"[💾 Download Flythrough (MP4)]({mp4_url})")
+    elif 'mp4_path' in locals() and mp4_path.exists():
+        with open(mp4_path, "rb") as vf:
+            st.download_button(
+                label="Download Flythrough (MP4)",
+                data=vf.read(),
+                file_name=f"depthwizard_flythrough_{st.session_state.session_id}.mp4",
+                mime="video/mp4"
+            )
 
 st.markdown("---")
 
@@ -647,8 +775,8 @@ with st.expander("HOW IT WORKS"):
     st.write("1. A single RGB image is processed using Depth Anything V2.")
     st.write("2. A known reference object provides a scale constraint.")
     st.write("3. The target object's approximate height is estimated.")
-    st.write("4. RGB and depth are converted into a 3D point cloud.")
-    st.write("5. A virtual camera generates a flythrough of the reconstructed scene.")
+    st.write("4. RGB and depth are converted into a 3D point cloud and surface mesh.")
+    st.write("5. A virtual camera generates a flythrough of the reconstructed 3D RGB scene.")
 
 st.markdown("#### LIMITATIONS")
 st.write("- Monocular depth provides relative depth.")

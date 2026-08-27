@@ -1,6 +1,6 @@
 """
 DEPTHWIZARD — AI Computation Backend API Server
-FastAPI Service for Depth Anything V2, Scale Calibration, Height Solver, 3D Point Cloud, and Flythrough MP4
+FastAPI Service for Depth Anything V2, Scale Calibration, Height Solver, 3D Point Cloud, Mesh Reconstruction, and Flythrough MP4
 """
 
 import sys
@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 import torch
 import numpy as np
 from PIL import Image
+import matplotlib.cm as cm
 
 # Add project root to sys.path
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -30,7 +31,7 @@ from src.depth_engine import estimate_depth, convert_to_distance_like_depth, sav
 from src.calibration import calibrate_scene
 from src.height_estimator import estimate_height
 from src.evaluation import evaluate_height
-from src.pointcloud import create_point_cloud, save_point_cloud_ply
+from src.pointcloud import create_point_cloud, reconstruct_surface_mesh, save_point_cloud_ply, save_mesh_ply
 from src.flythrough import generate_flythrough
 
 # Setup structured logging
@@ -105,7 +106,7 @@ async def analyze_image(
 ):
     """
     Execute full DepthWizard processing pipeline:
-    RGB Upload -> Depth Anything V2 -> Scale Calibration -> Height Solver -> Open3D 3D Cloud -> Flythrough MP4
+    RGB Upload -> Depth Anything V2 -> Scale Calibration -> Height Solver -> Open3D Point Cloud & Mesh -> Flythrough MP4
     """
     session_id = str(uuid.uuid4())[:8]
     session_dir = config.OUTPUT_DIR / f"session_{session_id}"
@@ -197,10 +198,11 @@ async def analyze_image(
             )
             evaluation_dict = eval_res.to_dict()
 
-        # 6. 3D Point Cloud Reconstruction
-        logger.info(f"Session [{session_id}] Generating 3D point cloud...")
+        # 6. 3D Point Cloud & Surface Mesh Reconstruction
+        logger.info(f"Session [{session_id}] Generating 3D point cloud & surface mesh...")
         metric_depth = dist_depth * calibration.scale_factor
         ply_path = session_dir / "scene.ply"
+        mesh_ply_path = session_dir / "scene_mesh.ply"
 
         points_3d, colors_3d, pc_stats = create_point_cloud(
             rgb_img=np_img,
@@ -209,32 +211,48 @@ async def analyze_image(
             voxel_size=voxel_size
         )
         save_point_cloud_ply(points_3d, colors_3d, str(ply_path))
-        logger.info(f"Session [{session_id}] 3D point cloud created with {len(points_3d):,} vertices.")
 
-        # 7. Virtual Flythrough MP4 Video Generation
-        logger.info(f"Session [{session_id}] Rendering flythrough MP4 video...")
+        # Surface Mesh Reconstruction
+        mesh_verts, mesh_faces, mesh_cols = reconstruct_surface_mesh(points_3d, colors_3d)
+        save_mesh_ply(mesh_verts, mesh_faces, mesh_cols, str(mesh_ply_path))
+
+        logger.info(f"Session [{session_id}] 3D point cloud ({len(points_3d):,} pts) & mesh ({len(mesh_verts):,} verts, {len(mesh_faces):,} faces) created.")
+
+        # 7. Virtual Flythrough MP4 Video Generation (Using true RGB colors)
+        logger.info(f"Session [{session_id}] Rendering 3D RGB flythrough MP4 video...")
         mp4_path = session_dir / "flythrough.mp4"
         generate_flythrough(
             points=points_3d,
             colors=colors_3d,
             output_path=str(mp4_path),
             duration_sec=config.FLYTHROUGH_DURATION,
-            fps=config.FLYTHROUGH_FPS
+            fps=config.FLYTHROUGH_FPS,
+            resolution=(1280, 720)
         )
         logger.info(f"Session [{session_id}] Flythrough rendering complete.")
 
-        # Base URL for static assets
-        base_url = "/api/media"
-        
-        # Sample points array for WebGL Three.js interactive visualizer (subsampled to 12k max)
+        # Compute Depth Colormap & Height Colormap arrays for display modes
         max_pts = 12000
         if len(points_3d) > max_pts:
             idx = np.random.choice(len(points_3d), max_pts, replace=False)
-            pts_sample = points_3d[idx].tolist()
-            cols_sample = colors_3d[idx].tolist()
+            pts_sample = points_3d[idx]
+            rgb_sample = colors_3d[idx]
         else:
-            pts_sample = points_3d.tolist()
-            cols_sample = colors_3d.tolist()
+            pts_sample = points_3d
+            rgb_sample = colors_3d
+
+        # Depth colormap (Plasma)
+        z_vals = pts_sample[:, 2]
+        z_norm = (z_vals - np.min(z_vals)) / (np.ptp(z_vals) + 1e-6)
+        depth_cols = cm.get_cmap("plasma")(z_norm)[:, :3].tolist()
+
+        # Height colormap (Turbo/Spectral)
+        y_vals = pts_sample[:, 1]
+        y_norm = (y_vals - np.min(y_vals)) / (np.ptp(y_vals) + 1e-6)
+        height_cols = cm.get_cmap("turbo")(y_norm)[:, :3].tolist()
+
+        # Base URL for static assets
+        base_url = "/api/media"
 
         return JSONResponse(content={
             "status": "success",
@@ -246,13 +264,18 @@ async def analyze_image(
             "evaluation": evaluation_dict,
             "pointcloud": {
                 "num_points": len(points_3d),
-                "ply_url": f"{base_url}/{session_id}/scene.ply",
-                "sample_points": pts_sample,
-                "sample_colors": cols_sample
+                "num_mesh_vertices": len(mesh_verts),
+                "num_mesh_faces": len(mesh_faces),
+                "sample_points": pts_sample.tolist(),
+                "sample_rgb_colors": rgb_sample.tolist(),
+                "sample_depth_colors": depth_cols,
+                "sample_height_colors": height_cols,
+                "stats": pc_stats
             },
             "media_urls": {
                 "depth_png": f"{base_url}/{session_id}/depth_visualization.png",
                 "ply_file": f"{base_url}/{session_id}/scene.ply",
+                "mesh_file": f"{base_url}/{session_id}/scene_mesh.ply",
                 "flythrough_mp4": f"{base_url}/{session_id}/flythrough.mp4"
             }
         })
@@ -265,7 +288,7 @@ async def analyze_image(
 @app.get("/api/media/{session_id}/{filename}")
 def get_media_file(session_id: str, filename: str):
     """
-    Serve generated static media assets (depth image, PLY cloud, MP4 video).
+    Serve generated static media assets (depth image, PLY cloud, mesh PLY, MP4 video).
     """
     file_path = config.OUTPUT_DIR / f"session_{session_id}" / filename
     if not file_path.exists():
@@ -275,7 +298,7 @@ def get_media_file(session_id: str, filename: str):
         mime = "image/png"
     elif filename.endswith(".mp4"):
         mime = "video/mp4"
-    elif filename.endswith(".ply"):
+    elif filename.endswith(".ply") or filename.endswith(".obj"):
         mime = "application/octet-stream"
     else:
         mime = "application/octet-stream"
