@@ -1,27 +1,27 @@
 {
-  "reference_height_m": 1.8,
-  "reference_measurement": 4.3712543702234665,
-  "calibration_scale": 0.41178111533874906,
-  "target_measurement": 5.683621948628315,
-  "estimated_target_height_m": 2.340408185169962,
+  "reference_height_m": 3.0,
+  "reference_measurement": 2.7221994915838694,
+  "calibration_scale": 1.102050018477704,
+  "target_measurement": 0.28309301149413824,
+  "estimated_target_height_m": 0.31198265854802393,
   "reference_coords": {
     "top": [
-      136,
-      55
+      100,
+      120
     ],
     "bottom": [
-      136,
-      138
+      100,
+      400
     ]
   },
   "target_coords": {
     "top": [
-      192,
-      37
+      320,
+      180
     ],
     "bottom": [
-      192,
-      166
+      320,
+      420
     ]
   }
 }
