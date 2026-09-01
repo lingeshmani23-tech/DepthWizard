@@ -587,6 +587,7 @@
             imageWidth: 0,
             imageHeight: 0,
             rawDepthData: null,
+            rawRgbData: null,
             depthMin: 0,
             depthMax: 0,
             depthMean: 0,
@@ -695,10 +696,12 @@
                 const reader = new FileReader();
                 reader.onload = function(evt) {
                     const img = new Image();
+                    img.crossOrigin = "anonymous";
                     img.onload = function() {
                         state.activeImage = img;
                         state.imageWidth = img.width;
                         state.imageHeight = img.height;
+                        state.rawRgbData = null;
 
                         document.getElementById("img-preview").src = evt.target.result;
                         document.getElementById("img-orig-display").src = evt.target.result;
@@ -726,163 +729,235 @@
             btn.disabled = true;
             btn.innerText = "⏳ Computing Depth Map & 3D Geometry...";
 
-            const img = state.activeImage;
-            const width = img.width;
-            const height = img.height;
+            try {
+                const img = state.activeImage;
+                const width = img.width || img.naturalWidth;
+                const height = img.height || img.naturalHeight;
 
-            // Create offscreen processing canvas
-            const offCanvas = document.createElement("canvas");
-            offCanvas.width = width;
-            offCanvas.height = height;
-            const offCtx = offCanvas.getContext("2d");
-            offCtx.drawImage(img, 0, 0);
-            const imgData = offCtx.getImageData(0, 0, width, height);
-            const data = imgData.data;
-
-            // Compute relative depth map using structure tensor edge & intensity depth model
-            const depthData = new Float32Array(width * height);
-            let minD = Infinity, maxD = -Infinity, sumD = 0;
-
-            for (let y = 0; y < height; y++) {
-                const normY = y / height;
-                const perspectiveFactor = 0.2 + 0.8 * Math.pow(normY, 1.4); // Natural outdoor ground plane tilt
-                for (let x = 0; x < width; x++) {
-                    const idx = (y * width + x) * 4;
-                    const r = data[idx] / 255.0;
-                    const g = data[idx + 1] / 255.0;
-                    const b = data[idx + 2] / 255.0;
-
-                    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-                    
-                    // Spatial gradient structure
-                    let grad = 0;
-                    if (x > 0 && x < width - 1 && y > 0 && y < height - 1) {
-                        const idxL = (y * width + (x - 1)) * 4;
-                        const idxR = (y * width + (x + 1)) * 4;
-                        const lumL = 0.299 * data[idxL] + 0.587 * data[idxL+1] + 0.114 * data[idxL+2];
-                        const lumR = 0.299 * data[idxR] + 0.587 * data[idxR+1] + 0.114 * data[idxR+2];
-                        grad = Math.abs(lumR - lumL) / 255.0;
-                    }
-
-                    let dVal = (0.3 * luminance + 0.7 * perspectiveFactor - 0.15 * grad);
-                    dVal = Math.max(0.05, Math.min(1.0, dVal));
-
-                    depthData[y * width + x] = dVal;
-                    if (dVal < minD) minD = dVal;
-                    if (dVal > maxD) maxD = dVal;
-                    sumD += dVal;
+                if (!width || !height) {
+                    throw new Error("Input image has invalid or 0 dimensions.");
                 }
+
+                state.imageWidth = width;
+                state.imageHeight = height;
+
+                // Create offscreen processing canvas
+                const offCanvas = document.createElement("canvas");
+                offCanvas.width = width;
+                offCanvas.height = height;
+                const offCtx = offCanvas.getContext("2d");
+                offCtx.drawImage(img, 0, 0);
+                const imgData = offCtx.getImageData(0, 0, width, height);
+                const data = imgData.data;
+
+                // Cache raw RGBA pixel array in state
+                state.rawRgbData = data;
+
+                // Compute relative depth map using structure tensor edge & intensity depth model
+                const depthData = new Float32Array(width * height);
+                let minD = Infinity, maxD = -Infinity, sumD = 0;
+
+                for (let y = 0; y < height; y++) {
+                    const normY = y / height;
+                    const perspectiveFactor = 0.2 + 0.8 * Math.pow(normY, 1.4); // Natural outdoor ground plane tilt
+                    for (let x = 0; x < width; x++) {
+                        const idx = (y * width + x) * 4;
+                        const r = data[idx] / 255.0;
+                        const g = data[idx + 1] / 255.0;
+                        const b = data[idx + 2] / 255.0;
+
+                        const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+                        
+                        // Spatial gradient structure
+                        let grad = 0;
+                        if (x > 0 && x < width - 1 && y > 0 && y < height - 1) {
+                            const idxL = (y * width + (x - 1)) * 4;
+                            const idxR = (y * width + (x + 1)) * 4;
+                            const lumL = 0.299 * data[idxL]/255.0 + 0.587 * data[idxL+1]/255.0 + 0.114 * data[idxL+2]/255.0;
+                            const lumR = 0.299 * data[idxR]/255.0 + 0.587 * data[idxR+1]/255.0 + 0.114 * data[idxR+2]/255.0;
+                            grad = Math.abs(lumR - lumL);
+                        }
+
+                        let dVal = (0.3 * luminance + 0.7 * perspectiveFactor - 0.15 * grad);
+                        dVal = Math.max(0.05, Math.min(1.0, dVal));
+                        if (isNaN(dVal)) dVal = 0.5;
+
+                        depthData[y * width + x] = dVal;
+                        if (dVal < minD) minD = dVal;
+                        if (dVal > maxD) maxD = dVal;
+                        sumD += dVal;
+                    }
+                }
+
+                state.rawDepthData = depthData;
+                state.depthMin = isFinite(minD) ? minD : 0.05;
+                state.depthMax = isFinite(maxD) ? maxD : 1.0;
+                state.depthMean = sumD / (width * height);
+
+                document.getElementById("d-min").innerText = state.depthMin.toFixed(2);
+                document.getElementById("d-max").innerText = state.depthMax.toFixed(2);
+                document.getElementById("d-mean").innerText = state.depthMean.toFixed(2);
+
+                // Render Depth Map to Depth Canvas
+                const depthCanvas = document.getElementById("depth-canvas");
+                depthCanvas.width = width;
+                depthCanvas.height = height;
+                const dCtx = depthCanvas.getContext("2d");
+                const dImgData = dCtx.createImageData(width, height);
+
+                for (let i = 0; i < depthData.length; i++) {
+                    const normD = (depthData[i] - state.depthMin) / (state.depthMax - state.depthMin + 1e-6);
+                    const rgb = getPlasmaColor(normD);
+                    dImgData.data[i * 4] = Math.round(rgb[0] * 255);
+                    dImgData.data[i * 4 + 1] = Math.round(rgb[1] * 255);
+                    dImgData.data[i * 4 + 2] = Math.round(rgb[2] * 255);
+                    dImgData.data[i * 4 + 3] = 255;
+                }
+                dCtx.putImageData(dImgData, 0, 0);
+
+                // Build 3D Point Cloud & Mesh
+                rebuildPointCloud();
+                calculateHeight();
+
+                const dbgErr = document.getElementById("dbg-error");
+                if (dbgErr) dbgErr.innerText = "None";
+            } catch (err) {
+                console.error("[DEPTHWIZARD] Analysis Error:", err);
+                const diagDetail = document.getElementById("pc-diag-detail");
+                if (diagDetail) diagDetail.innerText = `Analysis error: ${err.message}`;
+                const diagElem = document.getElementById("pointcloud-diagnostic");
+                if (diagElem) diagElem.style.display = "block";
+                const dbgErr = document.getElementById("dbg-error");
+                if (dbgErr) dbgErr.innerText = err.message;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Process & Analyze Image";
             }
-
-            state.rawDepthData = depthData;
-            state.depthMin = minD;
-            state.depthMax = maxD;
-            state.depthMean = sumD / (width * height);
-
-            document.getElementById("d-min").innerText = state.depthMin.toFixed(2);
-            document.getElementById("d-max").innerText = state.depthMax.toFixed(2);
-            document.getElementById("d-mean").innerText = state.depthMean.toFixed(2);
-
-            // Render Depth Map to Depth Canvas
-            const depthCanvas = document.getElementById("depth-canvas");
-            depthCanvas.width = width;
-            depthCanvas.height = height;
-            const dCtx = depthCanvas.getContext("2d");
-            const dImgData = dCtx.createImageData(width, height);
-
-            for (let i = 0; i < depthData.length; i++) {
-                const normD = (depthData[i] - minD) / (maxD - minD + 1e-6);
-                const rgb = getPlasmaColor(normD);
-                dImgData.data[i * 4] = Math.round(rgb[0] * 255);
-                dImgData.data[i * 4 + 1] = Math.round(rgb[1] * 255);
-                dImgData.data[i * 4 + 2] = Math.round(rgb[2] * 255);
-                dImgData.data[i * 4 + 3] = 255;
-            }
-            dCtx.putImageData(dImgData, 0, 0);
-
-            // Build 3D Point Cloud & Mesh
-            rebuildPointCloud();
-            calculateHeight();
-
-            btn.disabled = false;
-            btn.innerText = "Process & Analyze Image";
         }
 
         // Rebuild 3D Point Cloud & Surface Mesh from Canvas Image + Depth Tensor
         function rebuildPointCloud() {
             if (!state.activeImage || !state.rawDepthData) return;
 
-            const step = parseInt(document.getElementById("pt-density-slider").value, 10);
-            const width = state.imageWidth;
-            const height = state.imageHeight;
+            try {
+                let step = parseInt(document.getElementById("pt-density-slider").value, 10);
+                if (isNaN(step) || step < 1) step = 2;
 
-            const offCanvas = document.createElement("canvas");
-            offCanvas.width = width;
-            offCanvas.height = height;
-            const offCtx = offCanvas.getContext("2d");
-            offCtx.drawImage(state.activeImage, 0, 0);
-            const imgData = offCtx.getImageData(0, 0, width, height).data;
+                const width = state.imageWidth;
+                const height = state.imageHeight;
 
-            const fx = width * 0.8;
-            const fy = height * 0.8;
-            const cx = width / 2;
-            const cy = height / 2;
-
-            state.ptsData = [];
-            state.rgbCols = [];
-            state.depthCols = [];
-            state.heightCols = [];
-
-            let minY = Infinity, maxY = -Infinity;
-
-            for (let y = 0; y < height; y += step) {
-                for (let x = 0; x < width; x += step) {
-                    const idx = y * width + x;
-                    const d = state.rawDepthData[idx];
-
-                    // Z depth scaling
-                    const Z = (1.05 - d) * 4.0;
-                    const X = (x - cx) * Z / fx;
-                    const Y = -(y - cy) * Z / fy;
-
-                    state.ptsData.push([X, Y, Z]);
-
-                    if (Y < minY) minY = Y;
-                    if (Y > maxY) maxY = Y;
-
-                    // RGB Color
-                    const pixIdx = (y * width + x) * 4;
-                    const r = imgData[pixIdx] / 255.0;
-                    const g = imgData[pixIdx + 1] / 255.0;
-                    const b = imgData[pixIdx + 2] / 255.0;
-                    state.rgbCols.push([r, g, b]);
-
-                    // Depth Color (Plasma)
-                    const normD = (d - state.depthMin) / (state.depthMax - state.depthMin + 1e-6);
-                    state.depthCols.push(getPlasmaColor(normD));
+                // Use cached rawRgbData or fallback to canvas drawImage
+                let imgData = state.rawRgbData;
+                if (!imgData) {
+                    const offCanvas = document.createElement("canvas");
+                    offCanvas.width = width;
+                    offCanvas.height = height;
+                    const offCtx = offCanvas.getContext("2d");
+                    offCtx.drawImage(state.activeImage, 0, 0);
+                    imgData = offCtx.getImageData(0, 0, width, height).data;
+                    state.rawRgbData = imgData;
                 }
+
+                const fx = width * 0.8;
+                const fy = height * 0.8;
+                const cx = width / 2;
+                const cy = height / 2;
+
+                state.ptsData = [];
+                state.rgbCols = [];
+                state.depthCols = [];
+                state.heightCols = [];
+
+                let minY = Infinity, maxY = -Infinity;
+                let minX = Infinity, maxX = -Infinity;
+                let minZ = Infinity, maxZ = -Infinity;
+
+                for (let y = 0; y < height; y += step) {
+                    for (let x = 0; x < width; x += step) {
+                        const idx = y * width + x;
+                        let d = state.rawDepthData[idx];
+                        if (isNaN(d) || !isFinite(d)) d = 0.5;
+
+                        // Z depth scaling
+                        const Z = (1.05 - d) * 4.0;
+                        const X = (x - cx) * Z / fx;
+                        const Y = -(y - cy) * Z / fy;
+
+                        if (isFinite(X) && isFinite(Y) && isFinite(Z)) {
+                            state.ptsData.push([X, Y, Z]);
+
+                            if (Y < minY) minY = Y;
+                            if (Y > maxY) maxY = Y;
+                            if (X < minX) minX = X;
+                            if (X > maxX) maxX = X;
+                            if (Z < minZ) minZ = Z;
+                            if (Z > maxZ) maxZ = Z;
+
+                            // RGB Color
+                            const pixIdx = (y * width + x) * 4;
+                            const r = (imgData[pixIdx] || 0) / 255.0;
+                            const g = (imgData[pixIdx + 1] || 0) / 255.0;
+                            const b = (imgData[pixIdx + 2] || 0) / 255.0;
+                            state.rgbCols.push([r, g, b]);
+
+                            // Depth Color (Plasma)
+                            const normD = (d - state.depthMin) / (state.depthMax - state.depthMin + 1e-6);
+                            state.depthCols.push(getPlasmaColor(normD));
+                        }
+                    }
+                }
+
+                // Compute Height Colors (Turbo)
+                for (let i = 0; i < state.ptsData.length; i++) {
+                    const Y = state.ptsData[i][1];
+                    const normY = (Y - minY) / (maxY - minY + 1e-6);
+                    state.heightCols.push(getTurboColor(normY));
+                }
+
+                const ptCount = state.ptsData.length;
+                document.getElementById("pc-count").innerText = ptCount.toLocaleString();
+                document.getElementById("dbg-pts-count").innerText = ptCount.toLocaleString();
+
+                if (ptCount > 0) {
+                    const sceneW = (maxX - minX).toFixed(2) + " m";
+                    const sceneH = (maxY - minY).toFixed(2) + " m";
+                    const zRange = (minZ).toFixed(2) + " – " + (maxZ).toFixed(2);
+
+                    const elemW = document.getElementById("pc-w");
+                    if (elemW) elemW.innerText = sceneW;
+                    const elemH = document.getElementById("pc-h");
+                    if (elemH) elemH.innerText = sceneH;
+                    const elemZ = document.getElementById("pc-z-range");
+                    if (elemZ) elemZ.innerText = zRange;
+
+                    document.getElementById("status-ply-ready").innerText = "Ready ✓";
+                    document.getElementById("dl-ply").disabled = false;
+                    const plyMb = (ptCount * 32 / (1024 * 1024)).toFixed(2);
+                    document.getElementById("sz-ply").innerText = "(" + plyMb + " MB)";
+
+                    const diagElem = document.getElementById("pointcloud-diagnostic");
+                    if (diagElem) diagElem.style.display = "none";
+                } else {
+                    const diagDetail = document.getElementById("pc-diag-detail");
+                    if (diagDetail) diagDetail.innerText = "No valid depth points were extracted from the input image.";
+                    const diagElem = document.getElementById("pointcloud-diagnostic");
+                    if (diagElem) diagElem.style.display = "block";
+                }
+
+                // Render Point Cloud
+                renderPointCloud(state.ptsData, state.currentMode === 'depth' ? state.depthCols : (state.currentMode === 'height' ? state.heightCols : state.rgbCols));
+
+                // Generate Displaced 3D Grid Mesh
+                generateSurfaceMesh(step);
+            } catch (err) {
+                console.error("[DEPTHWIZARD] rebuildPointCloud Error:", err);
+                const diagDetail = document.getElementById("pc-diag-detail");
+                if (diagDetail) diagDetail.innerText = `Point cloud generation error: ${err.message}`;
+                const diagElem = document.getElementById("pointcloud-diagnostic");
+                if (diagElem) diagElem.style.display = "block";
+                const dbgErr = document.getElementById("dbg-error");
+                if (dbgErr) dbgErr.innerText = err.message;
             }
-
-            // Compute Height Colors (Turbo)
-            for (let i = 0; i < state.ptsData.length; i++) {
-                const Y = state.ptsData[i][1];
-                const normY = (Y - minY) / (maxY - minY + 1e-6);
-                state.heightCols.push(getTurboColor(normY));
-            }
-
-            document.getElementById("pc-count").innerText = state.ptsData.length.toLocaleString();
-            document.getElementById("dbg-pts-count").innerText = state.ptsData.length.toLocaleString();
-            document.getElementById("status-ply-ready").innerText = "Ready ✓";
-            document.getElementById("dl-ply").disabled = false;
-
-            const plyMb = (state.ptsData.length * 32 / (1024 * 1024)).toFixed(2);
-            document.getElementById("sz-ply").innerText = "(" + plyMb + " MB)";
-
-            // Render Point Cloud
-            renderPointCloud(state.ptsData, state.currentMode === 'depth' ? state.depthCols : (state.currentMode === 'height' ? state.heightCols : state.rgbCols));
-
-            // Generate Displaced 3D Grid Mesh
-            generateSurfaceMesh(step);
         }
 
         // Render Point Cloud Geometry in Three.js Scene
@@ -946,9 +1021,9 @@
                 meshObject = null;
             }
 
-            const cols = Math.floor(state.imageWidth / step);
-            const rows = Math.floor(state.imageHeight / step);
-            if (cols < 2 || rows < 2) return;
+            const cols = Math.ceil(state.imageWidth / step);
+            const rows = Math.ceil(state.imageHeight / step);
+            if (cols < 2 || rows < 2 || !state.ptsData || state.ptsData.length === 0) return;
 
             const planeGeo = new THREE.PlaneGeometry(3.5, 2.5, cols - 1, rows - 1);
             const posAttr = planeGeo.attributes.position;
@@ -1080,111 +1155,167 @@
             }
 
             if (state.isRecording) return;
-            state.isRecording = true;
 
             const btn = document.getElementById("btn-generate-flythrough");
-            btn.disabled = true;
-            btn.innerText = "⏳ Recording 3D Camera Traversal (180 frames)...";
-
             const badge = document.getElementById("video-status-badge");
-            badge.innerText = "Recording Flythrough...";
-
             const videoElem = document.getElementById("flythrough-video");
             const placeholderElem = document.getElementById("video-placeholder");
             const errorElem = document.getElementById("video-error-msg");
+            const errorDetail = document.getElementById("video-error-detail");
+            const dbgErr = document.getElementById("dbg-error");
 
-            if (videoElem) videoElem.style.display = "none";
-            if (errorElem) errorElem.style.display = "none";
-            if (placeholderElem) {
-                placeholderElem.style.display = "block";
-                document.getElementById("video-placeholder-text").innerText = "Recording 3D WebGL camera trajectory live in browser...";
-            }
+            try {
+                state.isRecording = true;
+                btn.disabled = true;
+                btn.innerText = "⏳ Recording 3D Camera Traversal (180 frames)...";
+                badge.innerText = "Recording Flythrough...";
 
-            // Capture WebGL Canvas Stream
-            const canvasElem = renderer.domElement;
-            const stream = canvasElem.captureStream(30);
-
-            let mimeType = "video/webm;codecs=vp9";
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-                mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8") ? "video/webm;codecs=vp8" : "video/webm";
-            }
-
-            const recordedChunks = [];
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
-
-            mediaRecorder.ondataavailable = function(e) {
-                if (e.data && e.data.size > 0) {
-                    recordedChunks.push(e.data);
+                if (videoElem) videoElem.style.display = "none";
+                if (errorElem) errorElem.style.display = "none";
+                if (placeholderElem) {
+                    placeholderElem.style.display = "block";
+                    document.getElementById("video-placeholder-text").innerText = "Recording 3D WebGL camera trajectory live in browser...";
                 }
-            };
 
-            mediaRecorder.onstop = function() {
-                const blob = new Blob(recordedChunks, { type: "video/webm" });
-                state.flythroughBlob = blob;
+                // Render initial frame to establish WebGL stream buffer
+                renderer.render(scene, camera);
 
-                if (state.flythroughUrl) URL.revokeObjectURL(state.flythroughUrl);
-                state.flythroughUrl = URL.createObjectURL(blob);
+                // Capture WebGL Canvas Stream
+                const canvasElem = renderer.domElement;
+                const stream = canvasElem.captureStream(30);
 
-                console.log("[FLYTHROUGH] Recorded Blob Size:", blob.size, "bytes");
+                const candidateCodecs = [
+                    "video/webm;codecs=vp9",
+                    "video/webm;codecs=vp8",
+                    "video/webm",
+                    "video/mp4;codecs=avc1",
+                    "video/mp4"
+                ];
 
-                document.getElementById("dbg-file-size").innerText = blob.size + " bytes (" + (blob.size / (1024 * 1024)).toFixed(2) + " MB)";
-                document.getElementById("dbg-playable").innerText = "Yes ✓";
+                let mimeType = candidateCodecs.find(c => MediaRecorder.isTypeSupported(c)) || "";
+                console.log("[FLYTHROUGH] Selected MediaRecorder MimeType:", mimeType);
 
-                videoElem.src = state.flythroughUrl;
-                videoElem.load();
-                videoElem.play().catch(e => console.log("Autoplay notice: ", e));
+                const recordedChunks = [];
+                const recorderOptions = mimeType ? { mimeType } : undefined;
+                const mediaRecorder = new MediaRecorder(stream, recorderOptions);
 
-                badge.innerText = "Flythrough Ready ✓";
+                mediaRecorder.ondataavailable = function(e) {
+                    if (e.data && e.data.size > 0) {
+                        recordedChunks.push(e.data);
+                    }
+                };
+
+                mediaRecorder.onerror = function(e) {
+                    console.error("[FLYTHROUGH] MediaRecorder error event:", e);
+                    const errMsg = (e.error && e.error.name) ? e.error.name : "MediaRecorder stream error";
+                    if (errorDetail) errorDetail.innerText = errMsg;
+                    if (errorElem) errorElem.style.display = "block";
+                    if (placeholderElem) placeholderElem.style.display = "none";
+                    if (dbgErr) dbgErr.innerText = errMsg;
+                    badge.innerText = "Recording Failed";
+                    state.isRecording = false;
+                    btn.disabled = false;
+                    btn.innerText = "🎬 Generate 3D Flythrough Video";
+                };
+
+                mediaRecorder.onstop = function() {
+                    try {
+                        const actualType = mimeType || "video/webm";
+                        const blob = new Blob(recordedChunks, { type: actualType });
+                        state.flythroughBlob = blob;
+
+                        if (state.flythroughUrl) URL.revokeObjectURL(state.flythroughUrl);
+                        state.flythroughUrl = URL.createObjectURL(blob);
+
+                        console.log("[FLYTHROUGH] Recorded Blob Size:", blob.size, "bytes");
+
+                        const fileSizeStr = blob.size + " bytes (" + (blob.size / (1024 * 1024)).toFixed(2) + " MB)";
+                        document.getElementById("dbg-file-size").innerText = fileSizeStr;
+                        document.getElementById("dbg-playable").innerText = "Yes ✓";
+                        if (dbgErr) dbgErr.innerText = "None";
+
+                        videoElem.src = state.flythroughUrl;
+                        videoElem.load();
+                        videoElem.play().catch(e => console.log("Autoplay notice: ", e));
+
+                        badge.innerText = "Flythrough Ready ✓";
+                        if (placeholderElem) placeholderElem.style.display = "none";
+                        if (errorElem) errorElem.style.display = "none";
+                        videoElem.style.display = "block";
+
+                        document.getElementById("vid-dur").innerText = "6.0 s";
+                        document.getElementById("vid-fps").innerText = "30 FPS";
+                        document.getElementById("vid-res").innerText = canvasElem.width + " x " + canvasElem.height;
+
+                        let displayCodec = "WebM (VP9)";
+                        if (actualType.includes("vp8")) displayCodec = "WebM (VP8)";
+                        else if (actualType.includes("mp4") || actualType.includes("avc1")) displayCodec = "MP4 (H.264)";
+                        else if (actualType.includes("webm")) displayCodec = "WebM Standard";
+
+                        document.getElementById("vid-codec").innerText = displayCodec;
+                        document.getElementById("status-mp4-ready").innerText = "Ready ✓";
+                        document.getElementById("sz-mp4").innerText = "(" + (blob.size / (1024 * 1024)).toFixed(2) + " MB)";
+                        document.getElementById("dl-mp4").disabled = false;
+                    } catch (stopErr) {
+                        console.error("[FLYTHROUGH] Error in onstop callback:", stopErr);
+                        if (errorDetail) errorDetail.innerText = stopErr.message;
+                        if (errorElem) errorElem.style.display = "block";
+                        if (placeholderElem) placeholderElem.style.display = "none";
+                        if (dbgErr) dbgErr.innerText = stopErr.message;
+                        badge.innerText = "Recording Failed";
+                    } finally {
+                        state.isRecording = false;
+                        btn.disabled = false;
+                        btn.innerText = "🎬 Generate 3D Flythrough Video";
+                    }
+                };
+
+                mediaRecorder.start();
+
+                // Perform Smooth 6-Second Camera Traversal Animation
+                const totalFrames = 180;
+                let currentFrame = 0;
+                const radius = 4.0;
+
+                function animateCameraTrajectory() {
+                    if (currentFrame < totalFrames) {
+                        currentFrame++;
+                        const progress = currentFrame / totalFrames;
+                        const angle = progress * Math.PI * 2;
+
+                        // Smooth 3D Orbit & Elevation Trajectory
+                        camera.position.x = radius * Math.sin(angle);
+                        camera.position.z = radius * Math.cos(angle);
+                        camera.position.y = 1.5 + 0.8 * Math.sin(angle * 2);
+                        camera.lookAt(0, 0, 0);
+                        controls.target.set(0, 0, 0);
+
+                        renderer.render(scene, camera);
+
+                        if (currentFrame % 30 === 0) {
+                            btn.innerText = `⏳ Recording frame ${currentFrame}/${totalFrames}...`;
+                        }
+                        requestAnimationFrame(animateCameraTrajectory);
+                    } else {
+                        if (mediaRecorder.state !== "inactive") {
+                            mediaRecorder.stop();
+                        }
+                        resetCameraView();
+                    }
+                }
+
+                animateCameraTrajectory();
+            } catch (err) {
+                console.error("[FLYTHROUGH] Recording setup error:", err);
+                if (errorDetail) errorDetail.innerText = err.message;
+                if (errorElem) errorElem.style.display = "block";
                 if (placeholderElem) placeholderElem.style.display = "none";
-                videoElem.style.display = "block";
-
-                document.getElementById("vid-dur").innerText = "6.0 s";
-                document.getElementById("vid-fps").innerText = "30 FPS";
-                document.getElementById("vid-res").innerText = canvasElem.width + " x " + canvasElem.height;
-                document.getElementById("vid-codec").innerText = "WebM (VP9)";
-
-                document.getElementById("status-mp4-ready").innerText = "Ready ✓";
-                document.getElementById("sz-mp4").innerText = "(" + (blob.size / (1024 * 1024)).toFixed(2) + " MB)";
-                document.getElementById("dl-mp4").disabled = false;
-
+                if (dbgErr) dbgErr.innerText = err.message;
+                badge.innerText = "Recording Failed";
                 state.isRecording = false;
                 btn.disabled = false;
                 btn.innerText = "🎬 Generate 3D Flythrough Video";
-            };
-
-            mediaRecorder.start();
-
-            // Perform Smooth 6-Second Camera Traversal Animation
-            const totalFrames = 180;
-            let currentFrame = 0;
-            const radius = 4.0;
-
-            function animateCameraTrajectory() {
-                if (currentFrame < totalFrames) {
-                    currentFrame++;
-                    const progress = currentFrame / totalFrames;
-                    const angle = progress * Math.PI * 2;
-
-                    // Smooth 3D Orbit & Elevation Trajectory
-                    camera.position.x = radius * Math.sin(angle);
-                    camera.position.z = radius * Math.cos(angle);
-                    camera.position.y = 1.5 + 0.8 * Math.sin(angle * 2);
-                    camera.lookAt(0, 0, 0);
-                    controls.target.set(0, 0, 0);
-
-                    renderer.render(scene, camera);
-
-                    if (currentFrame % 30 === 0) {
-                        btn.innerText = `⏳ Recording frame ${currentFrame}/${totalFrames}...`;
-                    }
-                    requestAnimationFrame(animateCameraTrajectory);
-                } else {
-                    mediaRecorder.stop();
-                    resetCameraView();
-                }
             }
-
-            animateCameraTrajectory();
         }
 
         // Section 08 — Browser File Export Generators
@@ -1199,9 +1330,9 @@
             for (let i = 0; i < state.ptsData.length; i++) {
                 const pt = state.ptsData[i];
                 const col = state.rgbCols[i];
-                const r = Math.round(col[0] * 255);
-                const g = Math.round(col[1] * 255);
-                const b = Math.round(col[2] * 255);
+                const r = Math.round((col ? col[0] : 0) * 255);
+                const g = Math.round((col ? col[1] : 0) * 255);
+                const b = Math.round((col ? col[2] : 0) * 255);
                 plyContent += `${pt[0].toFixed(4)} ${pt[1].toFixed(4)} ${pt[2].toFixed(4)} ${r} ${g} ${b}\n`;
             }
 
@@ -1248,16 +1379,45 @@
             if (state.flythroughUrl) URL.revokeObjectURL(state.flythroughUrl);
             state.activeImage = null;
             state.rawDepthData = null;
+            state.rawRgbData = null;
             state.ptsData = [];
+            state.rgbCols = [];
+            state.depthCols = [];
+            state.heightCols = [];
             state.flythroughBlob = null;
             state.flythroughUrl = null;
+            state.isRecording = false;
 
             document.getElementById("img-preview").src = "sample_images/sih_demo.jpg";
             document.getElementById("img-orig-display").src = "sample_images/sih_demo.jpg";
-            document.getElementById("flythrough-video").style.display = "none";
-            document.getElementById("video-placeholder").style.display = "block";
+            
+            const videoElem = document.getElementById("flythrough-video");
+            if (videoElem) {
+                videoElem.style.display = "none";
+                videoElem.src = "";
+            }
+            const placeholderElem = document.getElementById("video-placeholder");
+            if (placeholderElem) {
+                placeholderElem.style.display = "block";
+                document.getElementById("video-placeholder-text").innerText = 'Click "Generate 3D Flythrough Video" to record camera traversal.';
+            }
+            const errorElem = document.getElementById("video-error-msg");
+            if (errorElem) errorElem.style.display = "none";
 
+            const diagElem = document.getElementById("pointcloud-diagnostic");
+            if (diagElem) diagElem.style.display = "none";
+
+            document.getElementById("video-status-badge").innerText = "Standby";
             document.getElementById("pc-count").innerText = "0";
+            document.getElementById("dbg-pts-count").innerText = "0";
+            document.getElementById("dbg-file-size").innerText = "0 bytes";
+            document.getElementById("dbg-playable").innerText = "--";
+            document.getElementById("dbg-error").innerText = "None";
+
+            document.getElementById("pc-w").innerText = "--";
+            document.getElementById("pc-h").innerText = "--";
+            document.getElementById("pc-z-range").innerText = "--";
+
             document.getElementById("vid-dur").innerText = "--";
             document.getElementById("vid-fps").innerText = "--";
             document.getElementById("vid-res").innerText = "--";
@@ -1271,14 +1431,32 @@
             document.getElementById("dl-mesh").disabled = true;
             document.getElementById("dl-mp4").disabled = true;
 
+            const btnFlythrough = document.getElementById("btn-generate-flythrough");
+            if (btnFlythrough) {
+                btnFlythrough.disabled = false;
+                btnFlythrough.innerText = "🎬 Generate 3D Flythrough Video";
+            }
+
             if (pointCloud) { scene.remove(pointCloud); pointCloud = null; }
             if (meshObject) { scene.remove(meshObject); meshObject = null; }
             resetCameraView();
+
+            // Re-load default sample image into activeImage state so "Process & Analyze Image" can be re-run immediately
+            const defaultImg = new Image();
+            defaultImg.crossOrigin = "anonymous";
+            defaultImg.onload = function() {
+                state.activeImage = defaultImg;
+                state.imageWidth = defaultImg.width;
+                state.imageHeight = defaultImg.height;
+                drawOverlay();
+            };
+            defaultImg.src = "sample_images/sih_demo.jpg";
         }
 
         // Initial Auto Run
         window.addEventListener("DOMContentLoaded", () => {
             const defaultImg = new Image();
+            defaultImg.crossOrigin = "anonymous";
             defaultImg.onload = function() {
                 state.activeImage = defaultImg;
                 state.imageWidth = defaultImg.width;
